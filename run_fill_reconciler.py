@@ -390,7 +390,7 @@ async def run_loop(reconcilers: list, streamers: list, log: logging.Logger) -> N
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Run hl-trader fill reconciler")
+    parser = argparse.ArgumentParser(description="Run EVClaw fill reconciler")
     parser.add_argument(
         "--venue",
         choices=[

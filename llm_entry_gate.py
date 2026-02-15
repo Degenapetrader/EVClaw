@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LLM entry-gate for hl-trader using OpenClaw.
+"""LLM entry-gate for EVClaw using OpenClaw.
 
 This is Opt2: after deterministic candidate generation, ask a stateless agent to
 rank/veto a small candidate set.

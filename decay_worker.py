@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Decay worker for hl-trader.
+Decay worker for EVClaw.
 
 Producer-only worker:
 - evaluates open positions and emits DECAY_EXIT plans

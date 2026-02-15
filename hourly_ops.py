@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic hourly operations runner for hl-trader.
+"""Deterministic hourly operations runner for EVClaw.
 
 This script is intentionally non-LLM and deterministic:
 - process/tmux self-heal

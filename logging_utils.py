@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared logging helpers for hl-trader."""
+"""Shared logging helpers for EVClaw."""
 
 from __future__ import annotations
 

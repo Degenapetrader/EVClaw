@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trade tracker + SL/TP stats provider for hl-trader.
+"""Trade tracker + SL/TP stats provider for EVClaw.
 
 This module exists primarily to support the *adaptive* parameter layer.
 
@@ -40,7 +40,7 @@ class SLTPStats:
 
 
 class TradeTracker:
-    """Provides adaptive-learning stats from the hl-trader SQLite DB."""
+    """Provides adaptive-learning stats from the EVClaw SQLite DB."""
 
     def __init__(
         self,

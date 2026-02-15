@@ -196,7 +196,7 @@ def build_reflection_prompt(trade: Dict[str, Any]) -> str:
     }
 
     return (
-        "You are the hl-trader learning reflector.\n"
+        "You are the EVClaw learning reflector.\n"
         "Write ONE concise lesson for this closed trade.\n"
         "Return ONLY valid JSON matching this schema (no markdown, no commentary):\n"
         + json.dumps(schema, separators=(",", ":"), ensure_ascii=False)

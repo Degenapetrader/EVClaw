@@ -246,7 +246,7 @@ Update cadence: every 1 minute (per task requirement).
 - `ContextBuilderV2` passes `signals` into `ScoredOpportunity` as `{direction, z_score, ...}` (context_builder_v2.py:146-229).
 
 ### Recommended integration (minimal risk)
-1. Add a small loader module in `hl-trader` that reads the three JSON files and merges them into the per-symbol data used by `ContextBuilderV2`.
+1. Add a small loader module in `EVClaw` that reads the three JSON files and merges them into the per-symbol data used by `ContextBuilderV2`.
 2. Inject new signal entries into `signal_scores["signals"]` for:
    - `trend_filter`
    - `volume_profile`
@@ -258,7 +258,7 @@ Rationale: This keeps tracker/SSE unchanged and aligns with the existing `signal
 ### Alternative (bigger change)
 Embed these signals into tracker output (`symbol_watcher` SSE) so they behave like other `perp_signals`. This increases coupling and requires tracker changes and restarts.
 
-Recommendation: Use the minimal-risk loader approach first because it isolates changes to `hl-trader` and avoids modifying the tracker service.
+Recommendation: Use the minimal-risk loader approach first because it isolates changes to `EVClaw` and avoids modifying the tracker service.
 
 ## Open questions / verification checklist
 

@@ -11,7 +11,8 @@ This daemon:
 - polls ai_trader.db for new plan decisions
 - asks an OpenClaw agent to decide CLOSE vs HOLD
 - if CLOSE: executes via `python3 cli.py positions --close ...`
-- records an audit decision row in decay_decisions (decided_by=hl-exit-decider)
+- records an audit decision row in decay_decisions
+  (legacy `decided_by=hl-exit-decider` tag retained for DB compatibility)
 - appends JSONL journal to configured docs path (default: <EVCLAW_DOCS_DIR>/llm_decisions.jsonl)
 
 Execution-gate contract:
@@ -484,7 +485,7 @@ def _fetch_pending_plans(
 
 
 def _already_processed(conn: sqlite3.Connection, plan_id: int) -> bool:
-    """Return True if hl-exit-decider already recorded a decision for this plan id."""
+    """Return True if an exit-decider decision already exists for this plan id."""
     pid = int(plan_id)
     try:
         row = conn.execute(

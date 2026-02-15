@@ -45,3 +45,7 @@ memory/phantom_trades.yaml
 memory/trade_journal.*
 memory/circuit_breaker.yaml
 memory/symbol_blacklist.yaml
+
+# runtime docs artifacts (generated at runtime, not source docs)
+docs/llm_decisions.jsonl
+docs/openclawdiary.md

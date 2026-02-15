@@ -430,4 +430,4 @@ ALTER TABLE symbol_policy ADD COLUMN regime TEXT DEFAULT 'ALL';
 
 ---
 
-*Report generated for hl-trader AGI trading system review.*
+*Report generated for EVClaw AGI trading system review.*

@@ -340,7 +340,7 @@ def main(*, api: Any) -> int:
     default_loop_sleep_seconds = api.DEFAULT_LOOP_SLEEP_SECONDS
     default_claim_stale_seconds = api.DEFAULT_CLAIM_STALE_SECONDS
 
-    parser = argparse.ArgumentParser(description="hl-trader live agent runner")
+    parser = argparse.ArgumentParser(description="EVClaw live agent runner")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     execute = subparsers.add_parser(

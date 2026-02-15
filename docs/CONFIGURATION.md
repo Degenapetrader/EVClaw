@@ -1,8 +1,8 @@
-# hl-trader configuration
+# EVClaw configuration
 
 ## Files and precedence
 
-hl-trader uses **both**:
+EVClaw uses **both**:
 
 - `skill.yaml` (canonical, versioned defaults + structured config)
 - `.env` (machine-local secrets + optional overrides)
@@ -29,7 +29,7 @@ Suggested cutover:
 
 1) Backup current `.env` → `.env.full.bak.<timestamp>`
 2) Copy `.env.min` → `.env`
-3) Restart hl-trader tmux processes
+3) Restart EVClaw tmux processes
 
 ## Ownership Guardrails
 

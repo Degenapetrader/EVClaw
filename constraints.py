@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Deterministic constraints and priority compiler for hl-trader.
+Deterministic constraints and priority compiler for EVClaw.
 
 Enforces strong-signal inclusion and must-trade rules independent of LLM logic.
 """

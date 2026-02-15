@@ -165,7 +165,7 @@ Result: Position removed, phantom_detected event logged
 
 ## Next Steps
 
-1. **Deploy:** Restart hl-trader service to load fix
+1. **Deploy:** Restart EVClaw service to load fix
 2. **Monitor:** Watch for validation logs in next 3-5 cycles
 3. **Verify:** Confirm journal entries match exchange positions 1:1
 4. **Test:** Wait for natural duplicate/flip scenarios to validate behavior

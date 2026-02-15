@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Live Agent runner for hl-trader (context -> execute).
+Live Agent runner for EVClaw (context -> execute).
 
 This script is intended for the main agent to:
   - select candidates from JSON context

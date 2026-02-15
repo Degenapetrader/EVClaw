@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""hl-trader DB maintenance
+"""EVClaw DB maintenance
 
 - Atomic SQLite backups (via sqlite3 backup API)
 - Lightweight sanity checks for known corruption patterns
 - Optional auto-repair (authorized in AGI mode)
 
-This targets ai_trader.db (hl-trader) only.
+This targets ai_trader.db (EVClaw) only.
 """
 
 import argparse

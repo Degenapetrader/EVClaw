@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Utility helpers for hl-trader live agent mode.
+Utility helpers for EVClaw live agent mode.
 
 Includes candidate schema validation and sizing/risk helpers.
 """

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Analysis/report entrypoint for hl-trader.
+Analysis/report entrypoint for EVClaw.
 
 This script is ANALYSIS/REPORT only. It does not execute trades.
 """
@@ -332,7 +332,7 @@ async def run_sse(config: Dict[str, Any]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="hl-trader analysis/report")
+    parser = argparse.ArgumentParser(description="EVClaw analysis/report")
     parser.add_argument("--config", default=str(SKILL_DIR / "skill.yaml"), help="Path to skill.yaml")
     parser.add_argument("--cycle-file", help="Analyze a saved cycle JSON and exit")
     args = parser.parse_args()

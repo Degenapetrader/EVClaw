@@ -4,7 +4,7 @@ This repo now runs in **live agent** mode:
 
 - `cycle_trigger.py` saves the cycle, builds context (text + JSON), then emits a small system event.
 - `live_agent.py` builds scored candidates via `proposal_writer.py`.
-- `llm_entry_gate.py` (`hl-entry-gate`, gpt-5.2) chooses PICK/REJECT from those candidates.
+- `llm_entry_gate.py` (OpenClaw agent; defaults to `default`) chooses PICK/REJECT from those candidates.
 - Each approved pick executes on any **enabled** venue where the symbol is tradable.
 
 ## Cycle Trigger Behavior
@@ -51,7 +51,7 @@ python3 ${EVCLAW_ROOT}/live_agent.py run \
 
 Notes:
 - AGI-only: OpenClaw executes proposals directly (no user confirmation).
-- Entry gate is hard-enabled in code; `.env` controls model/thinking/timeout/max-keep only.
+- Entry gate is hard-enabled in code; `.env` controls agent/model/thinking/timeout/max-keep.
 - Manual approve/execute CLI commands are intentionally removed in AGI-only mode.
 
 ## Hard Gates

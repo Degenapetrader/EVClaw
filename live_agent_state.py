@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shared state helpers for hl-trader live agent mode.
+Shared state helpers for EVClaw live agent mode.
 
 Tracks main-agent busy state, last notified cycle, and pending cycle payloads.
 Uses a simple file lock to avoid concurrent writes from cycle_trigger and the
