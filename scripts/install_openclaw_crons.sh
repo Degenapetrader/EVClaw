@@ -8,7 +8,7 @@ cd "$ROOT_DIR"
 
 OPENCLAW_CMD="${OPENCLAW_CMD:-openclaw}"
 CRON_AGENT="${EVCLAW_OPENCLAW_CRON_AGENT:-main}"
-CRON_CHANNEL="${EVCLAW_OPENCLAW_CRON_CHANNEL:-}"
+CRON_CHANNEL="${EVCLAW_OPENCLAW_CRON_CHANNEL:-main}"
 CRON_TO="${EVCLAW_OPENCLAW_CRON_TO:-}"
 
 DB_PATH="${EVCLAW_DB_PATH:-$ROOT_DIR/ai_trader.db}"
@@ -107,4 +107,3 @@ add_cron_job "$JOB_NAME" "0 * * * *" "$hourly_message"
 
 echo "OpenClaw cron jobs installed:"
 echo "- $JOB_NAME"
-
