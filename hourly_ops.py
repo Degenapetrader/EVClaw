@@ -491,11 +491,40 @@ def _extract_positions(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _audit_positions(
+def _is_builder_symbol(symbol: str) -> bool:
+    s = str(symbol or "").strip()
+    return ":" in s
+
+
+def _normalize_order_status(raw: Any) -> str:
+    s = str(raw or "").strip().lower()
+    if s == "cancelled":
+        s = "canceled"
+    if s in {
+        "open",
+        "resting",
+        "partially_filled",
+        "filledorresting",
+        "filled",
+        "canceled",
+        "rejected",
+        "unknown",
+    }:
+        return s
+    return "unknown"
+
+
+def _is_openish_status(status: str) -> bool:
+    return status in {"open", "resting", "partially_filled", "filledorresting"}
+
+
+async def _audit_positions(
     conn: sqlite3.Connection,
     *,
     open_orders_by_account: Dict[str, List[Dict[str, Any]]],
     states_by_account: Dict[str, Dict[str, Any]],
+    adapters: Dict[str, HyperliquidAdapter],
+    report: Dict[str, Any],
 ) -> Dict[str, Any]:
     venue_list = sorted(OPEN_TRADE_VENUES)
     placeholders = ",".join("?" for _ in venue_list)
@@ -536,24 +565,88 @@ def _audit_positions(
         if coin not in db_by_coin:
             missing_in_db.append(f"{coin}:{pos['direction']}")
 
-    unprotected: List[str] = []
-    for coin, rows in sorted(db_by_coin.items()):
+    unprotected_builder: List[str] = []
+    unprotected_perps: List[str] = []
+    unknown_builder_protection: List[str] = []
+
+    for r in db_rows:
+        trade_id = int(r["id"])
+        symbol = str(r["symbol"] or "").strip().upper()
+        venue = str(r["venue"] or "").strip().lower()
+        coin = _symbol_to_coin(symbol)
+        sl = str(r["sl_order_id"] or "").strip()
+        tp = str(r["tp_order_id"] or "").strip()
+
+        if _is_builder_symbol(symbol):
+            if not sl or not tp:
+                unprotected_builder.append(
+                    f"{symbol}:trade_id={trade_id}:reason=missing_sltp_oid"
+                )
+                continue
+
+            adapter = _adapter_for_venue(venue, adapters)
+            if adapter is None:
+                unknown_builder_protection.append(
+                    f"{symbol}:trade_id={trade_id}:reason=missing_adapter"
+                )
+                report["warnings"].append(f"builder_protection_missing_adapter:{symbol}:{venue}")
+                continue
+
+            sl_status = "unknown"
+            tp_status = "unknown"
+            try:
+                sl_status = _normalize_order_status(
+                    (await adapter.check_order_status(symbol, sl)).get("status")
+                )
+            except Exception as exc:
+                report["warnings"].append(
+                    f"builder_sl_order_status_failed:{symbol}:{trade_id}:{exc}"
+                )
+
+            try:
+                tp_status = _normalize_order_status(
+                    (await adapter.check_order_status(symbol, tp)).get("status")
+                )
+            except Exception as exc:
+                report["warnings"].append(
+                    f"builder_tp_order_status_failed:{symbol}:{trade_id}:{exc}"
+                )
+
+            if sl_status in {"canceled", "rejected"} or tp_status in {"canceled", "rejected"}:
+                unprotected_builder.append(
+                    f"{symbol}:trade_id={trade_id}:sl={sl_status}:tp={tp_status}"
+                )
+                continue
+
+            if sl_status == "unknown" or tp_status == "unknown":
+                # Keep unknown in a separate bucket to avoid inflating hard
+                # unprotected counts from transient API visibility issues.
+                unknown_builder_protection.append(
+                    f"{symbol}:trade_id={trade_id}:sl={sl_status}:tp={tp_status}"
+                )
+                continue
+
+            if _is_openish_status(sl_status) and (_is_openish_status(tp_status) or tp_status == "filled"):
+                continue
+
+            unprotected_builder.append(
+                f"{symbol}:trade_id={trade_id}:sl={sl_status}:tp={tp_status}"
+            )
+            continue
+
         coin_orders = orders_by_coin.get(coin, [])
         open_oids = {str(o.get("oid")) for o in coin_orders if o.get("oid") is not None}
         reduce_only = sum(1 for o in coin_orders if bool(o.get("reduceOnly")))
 
-        protected = False
-        for r in rows:
-            sl = str(r["sl_order_id"] or "").strip()
-            tp = str(r["tp_order_id"] or "").strip()
-            if sl and tp and sl in open_oids and tp in open_oids:
-                protected = True
-                break
+        protected = bool(sl and tp and sl in open_oids and tp in open_oids)
         if not protected and reduce_only >= 2:
             protected = True
         if not protected:
-            trade_ids = ",".join(str(r["id"]) for r in rows)
-            unprotected.append(f"{coin}:trade_ids={trade_ids}:open_reduce_only={reduce_only}")
+            unprotected_perps.append(
+                f"{symbol}:trade_id={trade_id}:open_reduce_only={reduce_only}"
+            )
+
+    unprotected = list(unprotected_perps) + list(unprotected_builder)
 
     total_equity = 0.0
     for st in states_by_account.values():
@@ -563,6 +656,9 @@ def _audit_positions(
     return {
         "exchange_open_positions": len(exchange_positions),
         "missing_in_db": missing_in_db,
+        "unprotected_builder": unprotected_builder,
+        "unprotected_perps": unprotected_perps,
+        "unknown_builder_protection": unknown_builder_protection,
         "unprotected": unprotected,
         "equity_total": total_equity,
     }
@@ -726,7 +822,9 @@ def _write_outputs(report: Dict[str, Any], *, json_out: Path, summary_out: Path)
         f"equity={_safe_float(audit.get('equity_total', 0.0)):.2f} "
         f"open_pos={int(audit.get('exchange_open_positions', 0))} "
         f"missing_in_db={len(audit.get('missing_in_db', []))} "
-        f"unprotected={len(audit.get('unprotected', []))}"
+        f"unprot_builder={len(audit.get('unprotected_builder', []))} "
+        f"unprot_perps={len(audit.get('unprotected_perps', []))} "
+        f"unknown_builder={len(audit.get('unknown_builder_protection', []))}"
     )
     line4 = (
         f"pending_expired_cancelled={int(pending.get('expired_cancelled', 0))} "
@@ -848,16 +946,28 @@ async def _run_hourly(args: argparse.Namespace) -> int:
             )
             report["checks"]["unmatched_live_entries"] = unmatched
 
-            audit = _audit_positions(
+            audit = await _audit_positions(
                 conn,
                 open_orders_by_account=open_orders_by_account,
                 states_by_account=states_by_account,
+                adapters=adapters,
+                report=report,
             )
             report["checks"]["position_audit"] = audit
             if audit["missing_in_db"]:
                 report["warnings"].append(f"missing_positions_in_db:{len(audit['missing_in_db'])}")
-            if audit["unprotected"]:
-                report["warnings"].append(f"unprotected_positions:{len(audit['unprotected'])}")
+            if audit["unprotected_builder"]:
+                report["warnings"].append(
+                    f"unprotected_builder_positions:{len(audit['unprotected_builder'])}"
+                )
+            if audit["unprotected_perps"]:
+                report["warnings"].append(
+                    f"unprotected_perps_positions:{len(audit['unprotected_perps'])}"
+                )
+            if audit["unknown_builder_protection"]:
+                report["warnings"].append(
+                    f"unknown_builder_protection:{len(audit['unknown_builder_protection'])}"
+                )
         finally:
             for adapter in adapters.values():
                 try:
