@@ -3,7 +3,7 @@
 
 Wraps llm_exit_decider with HIP3-scoped defaults:
 - symbol prefixes: XYZ:
-- venue scope: hip3
+- venue scope: hyperliquid (canonical)
 - separate agent/model env namespace
 """
 
@@ -43,7 +43,7 @@ def _hip3_runtime_overrides() -> dict:
 
     return {
         "symbol_prefixes": ("XYZ:",),
-        "allowed_venues": ("hip3",),
+        "allowed_venues": ("hyperliquid",),
         "agent_id": hip3_agent_id,
         "model": hip3_model,
         "thinking": hip3_thinking,

@@ -13,7 +13,7 @@ SESSIONS=(
   # Core EVClaw
   [evclaw-cycle-trigger]="python3 cycle_trigger.py 2>&1"
   [evclaw-live-agent]="bash -c './run_hl_live_agent.sh 2>&1'"
-  [evclaw-exit-decider]="bash -c 'set -a && source .env && set +a && export EVCLAW_EXIT_DECIDER_VENUES=\"\${EVCLAW_EXIT_DECIDER_VENUES:-\${EVCLAW_PERPS_EXIT_DECIDER_VENUES:-hyperliquid,lighter}}\" && export EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES=\"\${EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES:-\${EVCLAW_PERPS_EXIT_DECIDER_SYMBOL_PREFIXES:-}}\" && python3 -u llm_exit_decider.py 2>&1'"
+  [evclaw-exit-decider]="bash -c 'set -a && source .env && set +a && export EVCLAW_EXIT_DECIDER_VENUES=\"\${EVCLAW_EXIT_DECIDER_VENUES:-\${EVCLAW_PERPS_EXIT_DECIDER_VENUES:-hyperliquid}}\" && export EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES=\"\${EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES:-\${EVCLAW_PERPS_EXIT_DECIDER_SYMBOL_PREFIXES:-}}\" && python3 -u llm_exit_decider.py 2>&1'"
   # Dedicated HIP3 exit decider (XYZ + hip3, isolated from global EXIT_DECIDER env).
   [evclaw-hip3-exit-decider]="bash -c 'set -a && source .env && set +a && python3 -u hip3_exit_decider.py 2>&1'"
   [evclaw-exit-outcome]="bash -c 'set -a && source .env && set +a && python3 -u exit_outcome_worker.py 2>&1'"
