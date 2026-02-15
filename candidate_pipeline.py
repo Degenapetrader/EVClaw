@@ -81,11 +81,35 @@ _HIP3_CFG = _load_skill_hip3_cfg()
 _EXPOSURE_CFG = _load_skill_exposure_cfg()
 _BRAIN_CFG = _load_skill_brain_cfg()
 
-CANDIDATE_MIN_CONVICTION = _skill_float(_BRAIN_CFG, "candidate_min_conviction", 0.1)
-CANDIDATE_SCORE_DIVISOR = _skill_float(_BRAIN_CFG, "candidate_score_divisor", 100.0)
-CANDIDATE_TOPK_MIN = _skill_int(_BRAIN_CFG, "candidate_topk_min", 4)
-CANDIDATE_TOPK_MAX = _skill_int(_BRAIN_CFG, "candidate_topk_max", MAX_CANDIDATES)
-CANDIDATE_TOPK_SCORE_GATE = _skill_float(_BRAIN_CFG, "candidate_topk_score_gate", 70.0)
+def _brain_runtime_float(key: str, default: float) -> float:
+    try:
+        from mode_controller import get_param as _mode_get_param
+
+        value = _mode_get_param("brain", key)
+        if value is not None:
+            return float(value)
+    except Exception:
+        pass
+    return _skill_float(_BRAIN_CFG, key, default)
+
+
+def _brain_runtime_int(key: str, default: int) -> int:
+    try:
+        from mode_controller import get_param as _mode_get_param
+
+        value = _mode_get_param("brain", key)
+        if value is not None:
+            return int(value)
+    except Exception:
+        pass
+    return _skill_int(_BRAIN_CFG, key, default)
+
+
+CANDIDATE_MIN_CONVICTION = _brain_runtime_float("candidate_min_conviction", 0.1)
+CANDIDATE_SCORE_DIVISOR = _brain_runtime_float("candidate_score_divisor", 100.0)
+CANDIDATE_TOPK_MIN = _brain_runtime_int("candidate_topk_min", 4)
+CANDIDATE_TOPK_MAX = _brain_runtime_int("candidate_topk_max", MAX_CANDIDATES)
+CANDIDATE_TOPK_SCORE_GATE = _brain_runtime_float("candidate_topk_score_gate", 70.0)
 SYMBOL_DOSSIER_MAX_CHARS = 600
 HIP3_FLOW_SL_ATR_MULT = _skill_float(_HIP3_CFG, "flow_sl_atr_mult", 1.4)
 HIP3_FLOW_TP_ATR_MULT = _skill_float(_HIP3_CFG, "flow_tp_atr_mult", 2.0)

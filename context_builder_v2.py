@@ -90,7 +90,27 @@ def _skill_executor_max_total_exposure(default: float = 100000000.0) -> float:
         return float(default)
 
 
-CB_MODE = "balanced"
+def _skill_mode(default: str = "balanced") -> str:
+    try:
+        cfg_file = Path(__file__).with_name("skill.yaml")
+        if not cfg_file.exists():
+            return str(default)
+        with cfg_file.open("r", encoding="utf-8") as f:
+            import yaml as _yaml
+            raw = _yaml.safe_load(f) or {}
+        if not isinstance(raw, dict):
+            return str(default)
+        cfg = raw.get("config") or {}
+        mode_cfg = cfg.get("mode_controller") or {}
+        mode = str(mode_cfg.get("mode", default)).strip().lower()
+        if mode in ("conservative", "balanced", "aggressive"):
+            return mode
+    except Exception:
+        pass
+    return str(default)
+
+
+CB_MODE = _skill_mode("balanced")
 
 CB_SLIDER_RISK = _skill_slider("risk_appetite", 50)
 CB_SLIDER_FREQ = _skill_slider("trade_frequency", 50)

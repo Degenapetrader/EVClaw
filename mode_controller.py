@@ -436,6 +436,8 @@ PARAM_SLIDERS: Dict[str, Dict[str, Tuple[str, bool]]] = {
     'brain': {
         'primary_min_z': (SLIDER_FREQ, True),
         'base_confidence_threshold': (SLIDER_FREQ, True),
+        'conviction_threshold': (SLIDER_FREQ, True),
+        'high_conviction_threshold': (SLIDER_FREQ, True),
         'strong_z_threshold': (SLIDER_FREQ, True),
         'size_t1': (SLIDER_RISK, False),
         'size_t2': (SLIDER_RISK, False),
@@ -606,7 +608,14 @@ def _apply_mode_multiplier(base: Dict[str, Dict[str, Any]], factor: float) -> Di
     data = deepcopy(base)
     for module, params in data.items():
         for param, value in params.items():
-            params[param] = _scale_value(value, factor, False)
+            # Mode semantics:
+            # - conservative: fewer trades, lower risk
+            # - aggressive: more trades, higher risk
+            # Reuse parameter classification from _choose_slider:
+            # - inverse=True (frequency/threshold style) => lower in aggressive, higher in conservative
+            # - inverse=False (risk/sizing/weight style) => higher in aggressive, lower in conservative
+            _, inverse = _choose_slider(module, param)
+            params[param] = _scale_value(value, factor, inverse)
     return data
 
 

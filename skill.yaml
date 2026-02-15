@@ -148,6 +148,11 @@ config:
     symbol_specific_learning: true
     decay_halflife_days: 30
   mode_controller:
+    # Primary trading profile switch for both humans and OpenClaw agents.
+    # Change this field first; avoid editing fine-grained sliders unless explicitly needed.
+    # conservative: fewer trades, stricter filters, smaller risk/sizing
+    # balanced: default baseline
+    # aggressive: more trades, looser filters, higher risk/sizing
     mode: balanced
     sliders:
       risk_appetite: 50

@@ -1,108 +1,121 @@
-# EVClaw — Open-Source AGI Trading System for Hyperliquid
+# EVClaw
 
-EVClaw is an autonomous trading system for Hyperliquid (perps + HIP3 stocks) that uses LLM-based, human-like decisions to run a full AGI-style flow.
+EVClaw is an autonomous AGI trading skill for Hyperliquid:
+- Perps trading
+- HIP3 builder stocks
+- Deterministic ops + OpenClaw agent supervision
 
-It builds real-time context, asks LLM gate/decision agents for entries and exits, and executes through exchange adapters.
-
-Runtime model: native Linux process stack (`python3` + `tmux`). Docker support is intentionally not included.
-
-```text
-Signal Sources (SSE/Tracker) → Cycle Trigger → Context Builder → Proposal Writer
-  → LLM Entry Gate (pick/reject) → Executor (chase limit orders) → SL/TP placement
-
-Running positions → Decay Worker + Position Review → LLM Exit Decider (close/hold) → Executor
-
-Closed trades → Fill Reconciler → Learning Reflector → Symbol Conclusions (feedback loop)
-```
+It is designed to run on a fresh Linux VPS with no dependency on your private local file layout.
 
 ## What EVClaw does
 
-EVClaw is a production-style AGI trading stack with:
+- Ingests market/tracker data from internet endpoints.
+- Builds opportunities and ranks candidates.
+- Uses OpenClaw agents for entry and exit decisions.
+- Executes through one wallet identity (`HYPERLIQUID_ADDRESS` + `HYPERLIQUID_API`).
+- Runs deterministic hourly/15m maintenance checks for safety.
 
-- LLM-gated entries and exits (no blind automation)
-- Chase-limit execution only (no market or IOC orders)
-- Multi-venue support (Hyperliquid perp, HIP3 stocks, Lighter)
-- Conviction-based size and confidence filtering
-- Adaptive SL/TP from ATR + per-symbol learning
-- Fill reconciliation + PnL tracking
-- Learning loop (reflections, dossier, symbol conclusions)
-- Guardian pre-filters before every LLM step
-- Sector exposure controls
-- SR-level resting-entry support
+## AGI flow
 
-## Quick Start
+`cycle_trigger` -> context builder -> entry gate -> executor -> position tracking -> exit producers -> exit decider -> executor close
+
+Rules:
+- Producers do not execute orders directly.
+- Executor is limit-first/chase-limit workflow.
+- DB is the source of truth for active trades and reconciliation.
+
+## Requirements
+
+- Linux VPS
+- `python3` (3.10+ recommended)
+- `pip` + virtualenv
+- `tmux`
+- `git`
+- OpenClaw installed and configured with a working LLM provider
+
+## Quick start
 
 ```bash
-git clone <your-repo-url>
-cd evclaw
+git clone <your-repo-url> EVClaw
+cd EVClaw
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 cp .env.example .env
-# Edit .env with your Hyperliquid wallet + API key
+# edit .env with your values
 ./bootstrap.sh
 ./start.sh
 ```
 
-`bootstrap.sh` also installs one OpenClaw cron job by default (`EVClaw AGI Trader Hourly (deterministic)`), which runs deterministic maintenance and posts a short summary. Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` to skip.
-If `openclaw` is missing, `bootstrap.sh` will try to install it via `npm i -g openclaw`.
+## Required environment variables
 
-## Prerequisites
+At minimum set:
+- `HYPERLIQUID_ADDRESS`
+- `HYPERLIQUID_API`
 
-- Linux server/VM
-- `python3` (3.10+), `pip`, `venv`
-- `tmux`
-- `openclaw` installed and provider-authenticated
-- Network access to EVPlus endpoints (`tracker.evplus.ai`, `node2.evplus`)
+Common network defaults:
+- tracker SSE host: `tracker.evplus.ai:8443`
+- HL private node/info endpoint: `node2.evplus.ai` (as configured in `.env`)
 
-## Required tmux sessions
+## Trading modes (important)
 
-- `evclaw-cycle-trigger`: writes cycle/context artifacts (~every 5m)
-- `evclaw-live-agent`: builds proposals and runs LLM entry gate
-- `evclaw-exit-decider`: LLM close/hold decisions for normal flow
-- `evclaw-hip3-exit-decider`: dedicated HIP3/builder close/hold decider
-- `evclaw-decay`: plan-only producer for decays and flips
-- `evclaw-review`: plan-only periodic reviewer
-- `evclaw-fill-reconciler`: tracks fills/PNL and emits learning tasks
-- `evclaw-exit-outcome`: evaluates delayed exit outcomes
-- `evclaw-learning-reflector`: LLM reflection + symbol conclusions
+EVClaw supports 3 top-level trading modes:
 
-## Key environment variables
+1. `conservative`
+2. `balanced` (default)
+3. `aggressive`
 
-See `.env.example` for all configurable variables and `docs/ENV_VARIABLES_FULL_REFERENCE.md` for an expanded list.
+Behavior intent:
+- `conservative`: fewer trades, stricter entry filters, smaller risk and sizing.
+- `balanced`: production baseline.
+- `aggressive`: more trades, looser entry filters, higher risk and sizing.
 
-EVClaw is network-first and depends on EVPlus services:
-- Tracker SSE/API via `tracker.evplus.ai`
-- Hyperliquid private node via `node2.evplus`
+Where to change mode:
+- Edit `config.mode_controller.mode` in `skill.yaml`.
 
-- `HYPERLIQUID_ADDRESS` (required)
-- `HYPERLIQUID_API` (required)
-- `EVCLAW_ROOT` (optional; auto-set by `bootstrap.sh`)
-- `EVCLAW_ENABLED_VENUES`
-- `EVCLAW_TRACKER_BASE_URL`
-- `EVCLAW_DB_PATH`
+For OpenClaw agents and human operators:
+- First change only `config.mode_controller.mode`.
+- Do not change individual sliders/overrides unless explicitly asked.
 
-## LLM provider
+Example:
 
-EVClaw delegates LLM decisions to OpenClaw (`openclaw agent`), with separate agents for entry and exit steps.
+```yaml
+config:
+  mode_controller:
+    mode: aggressive
+```
 
-Install and configure OpenClaw (OpenAI, Anthropic, etc.) in your environment before running.
+## Process model
 
-Required OpenClaw assumptions:
+Default runtime uses tmux sessions started by `./start.sh` (wrapper over `restart.sh`).
 
-- OpenClaw runtime is installed and usable from shell.
-- At least one LLM provider is configured and working.
-- Shell/exec permissions are allowed for EVClaw worker scripts.
-- By default EVClaw uses OpenClaw's default agent. You can override per workflow via:
-  `EVCLAW_LLM_GATE_AGENT_ID`,
-  `EVCLAW_HIP3_LLM_GATE_AGENT_ID`,
-  `EVCLAW_EXIT_DECIDER_AGENT_ID`,
-  `EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID`,
-  `EVCLAW_LEARNING_REFLECTOR_AGENT_ID`.
+Core sessions include:
+- `hl-cycle-trigger`
+- `hl-live-agent`
+- `hl-decay`
+- `hl-review`
+- `hl-exit-decider`
+- `hl-hip3-exit-decider`
+- `hl-learning-reflector`
+- `hl-exit-outcome`
+- `fill-reconciler`
+- `hl-vp-worker`
+- `hl-sr-worker`
+- `hl-trend-worker`
 
-## License
+## Operations and health
 
-See [LICENSE](LICENSE).
+- Deterministic ops job runs on schedule for reconciliation/maintenance.
+- OpenClaw cron job posts hourly status summary to main chat.
+- Health/ops output is written to local runtime files and logs.
 
-## Disclaimer
+## Troubleshooting
 
-This software is provided as-is. Trading cryptocurrencies involves substantial risk. Use at your own risk. Not financial advice.
+- If no trades appear, verify OpenClaw agent IDs and provider config.
+- If SSE fails, verify tracker endpoint/key in `.env`.
+- If HL auth fails, verify `HYPERLIQUID_ADDRESS` and `HYPERLIQUID_API`.
+- If processes are missing, run `./start.sh` again and inspect tmux sessions.
+
+## Safety notice
+
+This is real-money trading software. Start with small size, confirm live behavior, and monitor continuously before scaling.
