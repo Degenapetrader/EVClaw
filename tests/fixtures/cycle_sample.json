@@ -1,0 +1,25 @@
+{
+  "sequence": 123,
+  "timestamp": "2026-01-27T00:00:00Z",
+  "symbol_count": 4,
+  "symbols": {
+    "ETH": {
+      "best_bid": 3000.0,
+      "best_ask": 3001.0,
+      "price": 3000.5,
+      "atr_pct": 1.2
+    },
+    "BTC": {
+      "bid": 40000.0,
+      "ask": 40010.0
+    },
+    "SOL": {
+      "price": 100.0
+    },
+    "BAD": {
+      "best_bid": 101.0,
+      "best_ask": 100.0,
+      "price": 100.0
+    }
+  }
+}

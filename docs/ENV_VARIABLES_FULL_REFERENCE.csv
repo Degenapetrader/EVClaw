@@ -1,0 +1,33 @@
+key,default,required,purpose
+HYPERLIQUID_ADDRESS,,yes,Trading wallet address
+HYPERLIQUID_API,,yes,Trading API/private key for adapters
+HYPERLIQUID_PRIVATE_NODE,https://node2.evplus/info,no,Private node info endpoint
+HYPERLIQUID_PROXIES,,no,Optional comma-separated proxy list
+EVCLAW_DB_PATH,./ai_trader.db,no,SQLite DB location
+EVCLAW_RUNTIME_DIR,./state,no,Runtime artifacts directory
+EVCLAW_DOCS_DIR,./docs,no,Docs output directory
+EVCLAW_MEMORY_DIR,./memory,no,Runtime memory directory
+EVCLAW_SIGNALS_DIR,./signals,no,Worker signal output directory
+EVCLAW_TRACKER_BASE_URL,https://tracker.evplus.ai,no,Base tracker API URL
+EVCLAW_SSE_HOST,tracker.evplus.ai,no,SSE host
+EVCLAW_SSE_PORT,8443,no,SSE port
+EVCLAW_SSE_ENDPOINT,/sse/tracker,no,SSE endpoint path
+EVCLAW_TRACKER_HIP3_PREDATOR_URL,${EVCLAW_TRACKER_BASE_URL}/api/hip3/predator-state,no,HIP3 predator state URL
+EVCLAW_TRACKER_HIP3_SYMBOLS_URL,${EVCLAW_TRACKER_BASE_URL}/api/hip3-symbols,no,HIP3 symbols URL
+EVCLAW_TRACKER_SYMBOL_URL_TEMPLATE,${EVCLAW_TRACKER_BASE_URL}/api/symbols/{symbol_upper}.json,no,Per-symbol tracker metadata URL template
+EVCLAW_ENABLED_VENUES,"hyperliquid,hip3",no,Enabled execution venues
+EVCLAW_DEFAULT_VENUE_PERPS,hyperliquid,no,Default venue for perp symbols
+EVCLAW_DEFAULT_VENUE_HIP3,hip3,no,Default venue for HIP3 symbols
+EVCLAW_LLM_GATE_MODEL,,no,Entry gate model override
+EVCLAW_LLM_GATE_THINKING,high,no,Entry gate reasoning level
+EVCLAW_LLM_GATE_TIMEOUT_SEC,120,no,Entry gate timeout
+EVCLAW_LLM_GATE_MAX_KEEP,4,no,Entry gate max selected candidates
+EVCLAW_HIP3_LLM_GATE_MODEL,,no,HIP3 entry gate model override
+EVCLAW_EXIT_DECIDER_MODEL,openai-codex/gpt-5.2,no,Exit decider model
+EVCLAW_EXIT_DECIDER_THINKING,high,no,Exit decider reasoning level
+EVCLAW_HIP3_EXIT_DECIDER_MODEL,,no,HIP3 exit decider model
+LIGHTER_BASE_URL,https://mainnet.zklighter.elliot.ai,no,Lighter API base URL
+LIGHTER_ACCOUNT_INDEX,,no,Lighter account index
+LIGHTER_API_KEY_PRIVATE_KEY,,no,Lighter API private key
+LIGHTER_API_KEY_INDEX,,no,Lighter API key index
+MASSIVE_API_KEY,,no,Massive API key

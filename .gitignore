@@ -1,0 +1,47 @@
+__pycache__/
+.env
+.env.*
+!.env.example
+*.pyc
+*.log
+*.db
+*.db-wal
+*.db-shm
+state/
+signals/
+memory/
+memory/positions.yaml
+memory/positions.lock
+memory/*.lock
+memory/trade_journal.yaml
+memory/monitoring.db
+memory/monitoring.db-wal
+memory/monitoring.db-shm
+memory/*.json
+memory/cache/
+
+# local runtime artifacts
+ai_trader.db*
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+backups/
+
+# exchange adapter caches (local)
+exchanges/memory/
+
+# runtime state / logs / internal notes
+logs/
+notes/
+positions.yaml
+audit.md
+.pytest_cache/
+memory/*.md
+memory/last_cycle.txt
+memory/pending_cycle.txt
+memory/phantom_trades.yaml
+memory/trade_journal.*
+memory/circuit_breaker.yaml
+memory/symbol_blacklist.yaml

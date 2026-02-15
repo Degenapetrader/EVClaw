@@ -1,0 +1,17 @@
+# EVClaw Python Requirements
+
+# Core
+aiohttp>=3.9.0
+aiohttp-sse-client>=0.2.1
+python-dotenv>=1.0.1
+requests>=2.31.0
+websockets>=12.0
+pyyaml>=6.0
+eth-account>=0.13.0
+hyperliquid-python-sdk>=0.21.0
+lighter
+
+# Testing (optional)
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-timeout>=2.2.0

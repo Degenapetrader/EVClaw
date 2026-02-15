@@ -1,0 +1,330 @@
+name: EVClaw
+version: 0.6.2
+description: EVClaw trading skill for Lighter (crypto perps) and Hyperliquid (HIP3 stocks)
+main: main.py
+parser: signal_parser.py
+context_builder: context_builder_v2.py
+brain: trading_brain.py
+risk: risk_manager.py
+executor: executor.py
+learning: learning_engine.py
+config:
+  sse_host: tracker.evplus.ai
+  sse_port: 8443
+  sse_endpoint: /sse/tracker
+  symbols: all
+  context_builder:
+    max_opportunities: 30
+    min_score: 35.0
+    universe_cache_ttl_days: 1
+  brain:
+    base_confidence_threshold: 0.55
+    high_conviction_threshold: 0.75
+    conviction_chase_threshold: 0.70
+    conviction_blend_pipeline: 0.20
+    conviction_weights:
+      dead_capital: 0.35
+      whale: 0.26
+      ofm: 0.22
+      cvd: 0.10
+      fade: 0.07
+      hip3_main: 0.65
+    degen_mode: true
+    degen_multiplier: 1.5
+    max_candidates: 6
+    candidate_min_conviction: 0.1
+    candidate_score_divisor: 100.0
+    candidate_topk_min: 4
+    candidate_topk_max: 10
+    candidate_topk_score_gate: 70.0
+  hip3:
+    main_flow_z_threshold: 2.0
+    main_ofm_conf_threshold: 0.65
+    main_threshold_mult: 1.0
+    booster_size_mult_min: 0.7
+    booster_size_mult_max: 1.4
+    flow_sl_atr_mult: 1.4
+    flow_tp_atr_mult: 2.0
+    ofm_sl_atr_mult: 1.8
+    ofm_tp_atr_mult: 2.8
+    interrupts_enabled: true
+    target_net_pct: 20
+    soft_band_pct: 15
+    hard_band_pct: 30
+    trigger_global_cooldown_sec: 4.0
+    trigger_symbol_cooldown_sec: 45.0
+    trigger_ttl_sec: 600.0
+  decay:
+    trend_flip_score_short: -40
+    trend_flip_score_long: 40
+  review:
+    max_closes: 3
+    max_hold_records: 20
+    min_age_hours: 6
+    no_flag_hours: 2
+    no_progress_hours: 12
+    no_progress_max_win_pct: 0.75
+    no_progress_tp_progress_max: 0.25
+  exposure:
+    max_net_exposure_mult: 2.0
+    net_exposure_bias_threshold_usd: 15000
+    net_exposure_bonus: 1.05
+    net_exposure_penalty: 0.85
+    net_exposure_warn_min_conviction: 0.8
+    net_exposure_warn_mult: 2.0
+  guardian:
+    auto_guardian: true
+  risk:
+    starting_equity: 10000.0
+    min_risk_pct: 0.5
+    max_risk_pct: 2.5
+    base_risk_pct: 1.0
+    equity_floor_pct: 80.0
+    daily_drawdown_limit_pct: 10.0
+    max_concurrent_positions: 100
+    max_sector_concentration: 30
+    sector_map: {}
+    max_position_pct: 0.5
+    no_hard_stops: false
+    min_hold_hours: 2.0
+    emergency_loss_pct: 15.0
+    emergency_portfolio_loss_pct: 20.0
+    soft_stop_atr_mult: 2.0
+    soft_stop_alert: true
+    stale_signal_max_minutes: 10.0
+  safety:
+    enabled: true
+  executor:
+    base_position_size_usd: 500.0
+    min_position_notional_usd: 100.0
+    min_entry_fill_ratio: 0.05
+    min_entry_fill_notional_usd: 250.0
+    max_position_per_symbol_usd: 0.0
+    max_total_exposure_usd: 100000000.0
+    enable_sltp_backstop: true
+    adaptive_on_override: true
+    sl_atr_multiplier: 2.0
+    tp_atr_multiplier: 3.0
+    sl_fallback_pct: 2.0
+    sltp_delay_seconds: 1.5
+    dust_notional_usd: 10.0
+    chase_entry_tif: Alo
+    chase_exit_tif: Alo
+    chase_entry_fallback_after_seconds: 180
+    chase_entry_fallback_tif: Gtc
+    chase_exit_fallback_after_seconds: 60
+    chase_exit_fallback_tif: Gtc
+    chase_timeout: 300
+    chase_poll_interval: 5
+    chase_tick_offset: 2
+    chase_retrigger_ticks: 2
+    sr_limit_enabled: true
+    # Lock wait for placing SR-limit orders (manual /execute and guardian placement).
+    sr_limit_lock_timeout_sec: 10.0
+    # Best-effort lock for check/sync loops (keep short).
+    sr_limit_lock_check_timeout_sec: 0.2
+    sr_limit_max_pending: 100
+    # Pending SR-limit notional cap as % of equity.
+    # Degen directive (2026-02-13): raise to 5x equity (500%) so resting orders don't block entries.
+    sr_limit_max_notional_pct: 500.0
+    sr_limit_timeout_minutes: 60
+    sr_limit_min_distance_atr: 0.3
+    sr_limit_max_distance_atr: 1.0
+    sr_limit_min_strength_z: 0.5
+    sr_limit_chase_conviction_threshold: 0.5
+    sr_limit_fallback_chase_min_conviction: 0.3
+    sr_limit_reachable_atr_per_hour: 2.0
+    sr_limit_prefill_sl_hl: true
+  learning:
+    enabled: true
+    min_trades_for_adjustment: 30
+    min_symbol_trades: 10
+    weight_bounds:
+    - 0.5
+    - 2.0
+    significance_threshold: 0.1
+    learning_rate: 0.02
+    auto_update_interval_trades: 50
+    symbol_specific_learning: true
+    decay_halflife_days: 30
+  mode_controller:
+    mode: balanced
+    sliders:
+      risk_appetite: 50
+      trade_frequency: 50
+      aggression: 50
+      signal_weighting: 50
+      learning_speed: 50
+    overrides:
+      adaptive_entry:
+        boost_threshold: 0.55
+        conviction_mult_max: 1.5
+        conviction_mult_min: 0.5
+        delay_max: 300
+        delay_min: 0
+        ema_alpha: 0.1
+        min_samples: 10
+        reduce_threshold: 0.4
+      adaptive_sizing:
+        conviction_buckets:
+          HIGH:
+          - 0.7
+          - 0.85
+          LOW:
+          - 0.0
+          - 0.5
+          MEDIUM:
+          - 0.5
+          - 0.7
+          VERY_HIGH:
+          - 0.85
+          - 1.0
+        decrease_threshold: 0.4
+        ema_alpha: 0.1
+        increase_threshold: 0.55
+        kelly_fraction: 0.25
+        max_kelly_bet: 2.5
+        min_samples: 10
+        risk_mult_max: 1.5
+        risk_mult_min: 0.5
+        use_kelly: true
+      adaptive_sltp:
+        default_sl_mult: 2.0
+        default_tp_mult: 3.0
+        ema_alpha: 0.1
+        max_rr_ratio: 2.5
+        min_rr_ratio: 1.0
+        min_samples: 10
+        sl_range_max: 3.0
+        sl_range_min: 1.0
+        tighten_tp_threshold: 0.7
+        tp_range_max: 5.0
+        tp_range_min: 1.5
+        widen_sl_threshold: 0.6
+      symbol_rr_learning:
+        binance_oi_weight: 0.75
+        category_defaults:
+          LARGE_CAP:
+            sl: 1.75
+            tp: 2.75
+          MAJOR:
+            sl: 1.5
+            tp: 2.5
+          MICRO_CAP:
+            sl: 2.5
+            tp: 4.0
+          MID_CAP:
+            sl: 2.0
+            tp: 3.0
+          SMALL_CAP:
+            sl: 2.25
+            tp: 3.5
+        default_sl_mult: 2.0
+        default_tp_mult: 3.0
+        hl_oi_weight: 0.25
+        lookback_days: 60
+        min_samples_for_confidence: 50
+        min_samples_for_symbol_policy: 15
+        oi_cache_ttl: 3600
+        oi_large_cap: 100000000
+        oi_major: 500000000
+        oi_mid_cap: 20000000
+        oi_small_cap: 5000000
+        prior_strength: 10
+        sl_max: 4.0
+        sl_min: 1.2
+        tp_max: 6.0
+        tp_min: 1.5
+  exit_decider:
+    # Re-entry cooldown after stop-loss closes (minutes).
+    sl_reentry_cooldown_minutes: 60
+    # Re-entry cooldown after generic EXIT decisions (minutes).
+    reentry_cooldown_minutes: 60
+    # Re-entry cooldown after take-profit closes (minutes).
+    tp_reentry_cooldown_minutes: 15
+    # Backoff after decider says HOLD for the same trade_id.
+    backoff_after_hold_sec: 3600
+    # Backoff after decider close attempt fails for the same trade_id.
+    backoff_after_close_failed_sec: 1800
+    # Escalate cooldown when consecutive CLOSE_FAILED streak is high.
+    close_failed_streak_threshold: 3
+    backoff_after_close_failed_streak_sec: 3600
+    # Dynamic per-loop close cap under backlog pressure.
+    dynamic_max_actions_enabled: true
+    dynamic_max_actions_cap: 3
+    # Max snapshot age (seconds) allowed for exposure context in prompts.
+    exposure_max_age_sec: 900
+  exit_outcome:
+    regret_horizon_sec: 7200
+    close_regret_move_pct: 0.8
+  fill_reconciler:
+    adaptive_max_concurrency: 1
+memory:
+  signal_weights: memory/signal_weights.yaml
+  trade_journal: memory/trade_journal.yaml
+  symbol_blacklist: memory/symbol_blacklist.yaml
+  circuit_breaker: memory/circuit_breaker.yaml
+exchanges:
+  router:
+    overrides: {}
+  lighter:
+    type: crypto_perps
+    enabled: true
+  hyperliquid:
+    type: hip3_stocks
+    enabled: true
+phases:
+  phase1_sse_consumer:
+    status: implemented
+    files:
+    - sse_consumer.py
+    - signal_parser.py
+  phase2_context_brain:
+    status: implemented
+    files:
+    - context_builder_v2.py
+    - trading_brain.py
+    features:
+    - opportunity_scoring
+    - conviction_based_decisions
+    - signal_weighting
+    - veto_conditions_whale_cvd
+  phase3_risk_manager:
+    status: implemented
+    files:
+    - risk_manager.py
+    - safety_manager.py
+    features:
+    - dynamic_position_sizing
+    - decay_based_exits
+    - exposure_limits
+    - safety_tiers
+    - emergency_exit_backstop
+  phase4_executor:
+    status: implemented
+    files:
+    - executor.py
+    features:
+    - lighter_orders
+    - hl_orders
+    - position_tracking
+    - optional_sltp_backstop
+    - rate_limit_queue
+    - token_bucket_rate_limiter
+    - atomic_position_persistence
+    - crash_recovery_state_machine
+    - atr_based_sizing
+    - exposure_limits
+  phase5_learning:
+    status: implemented
+    files:
+    - learning_engine.py
+    features:
+    - per_signal_expectancy_tracking
+    - symbol_specific_weights
+    - statistical_significance_testing
+    - bayesian_weight_updates
+    - atomic_persistence
+    - trade_attribution_shapley_lite
+    - orphan_handling
+    - auto_update_triggers

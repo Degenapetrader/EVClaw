@@ -1,0 +1,25 @@
+group,key,default,required,notes
+network,HYPERLIQUID_PRIVATE_NODE,https://node2.evplus/info,no,EVPlus private node endpoint
+network,EVCLAW_TRACKER_BASE_URL,https://tracker.evplus.ai,no,EVPlus tracker API base
+network,EVCLAW_SSE_HOST,tracker.evplus.ai,no,Tracker SSE host
+network,EVCLAW_SSE_PORT,8443,no,Tracker SSE port
+network,EVCLAW_SSE_ENDPOINT,/sse/tracker,no,Tracker SSE endpoint
+tracker,EVCLAW_TRACKER_HIP3_PREDATOR_URL,${EVCLAW_TRACKER_BASE_URL}/api/hip3/predator-state,no,HIP3 predator state URL
+tracker,EVCLAW_TRACKER_HIP3_SYMBOLS_URL,${EVCLAW_TRACKER_BASE_URL}/api/hip3-symbols,no,HIP3 symbols URL
+tracker,EVCLAW_TRACKER_SYMBOL_URL_TEMPLATE,${EVCLAW_TRACKER_BASE_URL}/api/symbols/{symbol_upper}.json,no,Per-symbol tracker URL template
+wallet,HYPERLIQUID_ADDRESS,,yes,Trading wallet address
+wallet,HYPERLIQUID_API,,yes,Trading API/private key
+runtime,EVCLAW_DB_PATH,./ai_trader.db,no,SQLite DB path
+runtime,EVCLAW_RUNTIME_DIR,./state,no,Runtime artifacts directory
+runtime,EVCLAW_MEMORY_DIR,./memory,no,Runtime memory directory
+runtime,EVCLAW_SIGNALS_DIR,./signals,no,Signals output directory
+venues,EVCLAW_ENABLED_VENUES,"hyperliquid,hip3",no,Enabled venues
+venues,EVCLAW_DEFAULT_VENUE_PERPS,hyperliquid,no,Default venue for perps
+venues,EVCLAW_DEFAULT_VENUE_HIP3,hip3,no,Default venue for HIP3 symbols
+llm,EVCLAW_LLM_GATE_MODEL,,no,Entry gate model override
+llm,EVCLAW_EXIT_DECIDER_MODEL,openai-codex/gpt-5.2,no,Exit decider model
+llm,EVCLAW_HIP3_EXIT_DECIDER_MODEL,,no,HIP3 exit decider model
+lighter,LIGHTER_BASE_URL,https://mainnet.zklighter.elliot.ai,no,Optional Lighter endpoint
+lighter,LIGHTER_ACCOUNT_INDEX,,no,Optional Lighter account index
+lighter,LIGHTER_API_KEY_PRIVATE_KEY,,no,Optional Lighter private key
+lighter,LIGHTER_API_KEY_INDEX,,no,Optional Lighter key index

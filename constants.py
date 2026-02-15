@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""
+Shared numeric defaults for HL-Trader.
+
+Use these to avoid duplicated magic numbers across modules.
+"""
+
+# Common 55% default used by confidence/conviction-style thresholds.
+BASE_CONFIDENCE_THRESHOLD = 0.55
+DEFAULT_BRAIN_SIZE_T1 = BASE_CONFIDENCE_THRESHOLD
+DEFAULT_RISK_CONVICTION_BASE = BASE_CONFIDENCE_THRESHOLD
+DEFAULT_ADAPTIVE_ENTRY_BOOST_THRESHOLD = BASE_CONFIDENCE_THRESHOLD
+DEFAULT_ADAPTIVE_SIZING_INCREASE_THRESHOLD = BASE_CONFIDENCE_THRESHOLD
