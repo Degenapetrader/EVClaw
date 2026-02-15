@@ -81,16 +81,18 @@ Diary: $DOCS_DIR/openclawdiary.md
 Tasks:
 1) Health + process check:
    cd $ROOT_DIR && bash _agi_flow_healthcheck.sh
-2) DB maintenance check:
+2) SL/TP incident reconcile (safe, DB-only):
+   cd $ROOT_DIR && python3 sltp_incident_reconciler.py
+3) DB maintenance check:
    cd $ROOT_DIR && python3 db_maintenance.py --check
-3) Last 60m closed trades summary:
+4) Last 60m closed trades summary:
    SELECT symbol, venue, realized_pnl
    FROM trades
    WHERE exit_time >= strftime('%s','now')-3600
    ORDER BY exit_time DESC
    LIMIT 20;
-4) Equity/exposure snapshot from latest monitor snapshots.
-5) Append one short diary line to $DOCS_DIR/openclawdiary.md
+5) Equity/exposure snapshot from latest monitor snapshots.
+6) Append one short diary line to $DOCS_DIR/openclawdiary.md
 
 Output format:
 - 2-4 short lines suitable for ops notifications.
