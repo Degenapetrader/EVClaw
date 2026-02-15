@@ -65,17 +65,9 @@ warn_if_missing_runtime_env() {
 }
 
 ensure_openclaw_cli() {
-  if command -v openclaw >/dev/null 2>&1; then
-    return 0
-  fi
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "openclaw is required but npm is missing; install Node.js + npm first." >&2
-    return 1
-  fi
-  echo "openclaw not found. Installing via: npm i -g openclaw"
-  npm i -g openclaw
   if ! command -v openclaw >/dev/null 2>&1; then
-    echo "openclaw install failed. Run manually: npm i -g openclaw" >&2
+    echo "openclaw is required but was not found in PATH." >&2
+    echo "Install and configure OpenClaw first, then re-run ./bootstrap.sh" >&2
     return 1
   fi
 }
@@ -114,8 +106,46 @@ ensure_openclaw_skill_link() {
   echo "Linked EVClaw into OpenClaw skills: $link_path -> $DIR"
 }
 
+install_openclaw_helper_skills() {
+  local enabled="${EVCLAW_INSTALL_EXTRA_SKILLS:-1}"
+  if [[ "$enabled" != "1" && "${enabled,,}" != "true" && "${enabled,,}" != "yes" ]]; then
+    echo "Skipping helper skill install (EVCLAW_INSTALL_EXTRA_SKILLS=$enabled)"
+    return 0
+  fi
+
+  local skills_dir="${EVCLAW_OPENCLAW_SKILLS_DIR:-${OPENCLAW_SKILLS_DIR:-$HOME/.openclaw/skills}}"
+  local bundle_dir="$DIR/openclaw_skills"
+  local skills_csv="${EVCLAW_EXTRA_SKILLS:-trade,execute,best3,stats,hedge}"
+
+  if [[ ! -d "$bundle_dir" ]]; then
+    echo "Helper skill bundle not found: $bundle_dir" >&2
+    return 1
+  fi
+
+  mkdir -p "$skills_dir"
+  IFS=',' read -r -a requested <<< "$skills_csv"
+  for raw in "${requested[@]}"; do
+    local name="${raw//[[:space:]]/}"
+    [[ -z "$name" ]] && continue
+    local src="$bundle_dir/$name"
+    local dst="$skills_dir/$name"
+
+    if [[ ! -d "$src" ]]; then
+      echo "Helper skill missing in bundle (skip): $name" >&2
+      continue
+    fi
+
+    if [[ -e "$dst" || -L "$dst" ]]; then
+      rm -rf "$dst"
+    fi
+    ln -s "$src" "$dst"
+    echo "Installed OpenClaw helper skill: $dst -> $src"
+  done
+}
+
 ensure_openclaw_cli
 ensure_openclaw_skill_link
+install_openclaw_helper_skills
 warn_if_missing_runtime_env
 
 mkdir -p state memory signals docs

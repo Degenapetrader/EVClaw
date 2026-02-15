@@ -5,7 +5,7 @@
 - `pip` and `venv` (`python3 -m venv`)
 - `tmux`
 - `git`
-- `openclaw` configured with a model provider (`bootstrap.sh` can auto-install CLI if missing and `npm` exists)
+- `openclaw` installed and configured with a model provider
 
 ## Quick Install
 ```bash
@@ -23,6 +23,14 @@ By default, `bootstrap.sh` also provisions one OpenClaw cron job for ops coverag
 - `EVClaw AGI Trader Hourly (deterministic)`
 
 Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` if you want to skip cron installation.
+
+By default, `bootstrap.sh` also installs helper skills into OpenClaw:
+- `trade`, `execute`, `best3`, `hedge`, `stats`
+
+Control helper skill installation with:
+- `EVCLAW_INSTALL_EXTRA_SKILLS=0` to skip
+- `EVCLAW_EXTRA_SKILLS=trade,execute,best3,stats,hedge` to customize
+- `EVCLAW_OPENCLAW_SKILLS_DIR=/your/path` to change target skills directory
 
 `bootstrap.sh` auto-sets `EVCLAW_ROOT` in `.env` to the current repo path so path-dependent defaults stay portable on any machine/location.
 

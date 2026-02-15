@@ -47,6 +47,15 @@ cp .env.example .env
 ./start.sh
 ```
 
+`bootstrap.sh` installs EVClaw into OpenClaw `skills/` and also installs helper skills:
+- `trade`
+- `execute`
+- `best3`
+- `hedge`
+- `stats`
+
+Default target is `~/.openclaw/skills` (override with `EVCLAW_OPENCLAW_SKILLS_DIR`).
+
 ## Required environment variables
 
 At minimum set:
@@ -90,18 +99,24 @@ config:
 Default runtime uses tmux sessions started by `./start.sh` (wrapper over `restart.sh`).
 
 Core sessions include:
-- `hl-cycle-trigger`
-- `hl-live-agent`
-- `hl-decay`
-- `hl-review`
-- `hl-exit-decider`
-- `hl-hip3-exit-decider`
-- `hl-learning-reflector`
-- `hl-exit-outcome`
-- `fill-reconciler`
-- `hl-vp-worker`
-- `hl-sr-worker`
-- `hl-trend-worker`
+- `evclaw-cycle-trigger`
+- `evclaw-live-agent`
+- `evclaw-exit-decider`
+- `evclaw-hip3-exit-decider`
+- `evclaw-exit-outcome`
+- `evclaw-decay`
+- `evclaw-review`
+- `evclaw-fill-reconciler`
+- `evclaw-learning-reflector`
+
+## OpenClaw helper commands
+
+After bootstrap, these user-facing helper skills are available:
+- `/trade <SYMBOL>`
+- `/execute <PLAN_ID> chase|limit [ttl]`
+- `/best3`
+- `/hedge`
+- `/stats`
 
 ## Operations and health
 
