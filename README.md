@@ -43,7 +43,7 @@ cp .env.example .env
 ./start.sh
 ```
 
-`bootstrap.sh` also installs two OpenClaw cron jobs by default (health check every 15m and hourly maintenance summary). Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` to skip.
+`bootstrap.sh` also installs one OpenClaw cron job by default (`EVClaw AGI Trader Hourly (deterministic)`), which runs deterministic maintenance and posts a short summary. Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` to skip.
 If `openclaw` is missing, `bootstrap.sh` will try to install it via `npm i -g openclaw`.
 
 ## Prerequisites
