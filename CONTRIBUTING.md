@@ -36,8 +36,8 @@ Be respectful and constructive. We welcome contributions from everyone.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/evclaw.git
-cd evclaw
+git clone https://github.com/Degenapetrader/EVClaw.git
+cd EVClaw
 
 # Create virtual environment
 python3 -m venv .venv
@@ -55,7 +55,7 @@ cp .env.example .env
 
 1. Edit `skill.yaml` for trading parameters
 2. Set environment variables in `.env`
-3. See `docs/CONFIGURATION.md` for detailed options
+3. See `references/configuration.md` for detailed options
 
 ## Making Changes
 

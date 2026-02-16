@@ -237,8 +237,10 @@ Persistent state is stored in `memory/`:
 ### Python Packages
 - aiohttp>=3.9.0
 - pyyaml>=6.0
-- hyperliquid
-- lighter
+- requests>=2.31.0
+- python-dotenv>=1.0.1
+- hyperliquid-python-sdk>=0.21.0
+- lighter-sdk (optional, installed from `requirements-lighter.txt` when Lighter venue is enabled)
 
 ### System Dependencies
 - Python 3.10+
