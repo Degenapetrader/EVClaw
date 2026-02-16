@@ -61,6 +61,7 @@ Default target is `~/.openclaw/skills` (override with `EVCLAW_OPENCLAW_SKILLS_DI
 
 This is optional and intentionally NOT part of `bootstrap.sh`.
 Use it only when the user explicitly agrees.
+The seed includes learned `symbol_policy` rows (per-symbol SL/TP adjustments).
 
 Maintainer side (export from `hl-trader`):
 

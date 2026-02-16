@@ -44,6 +44,7 @@ Optional Lighter dependency install:
 
 ## Optional learning warm-start (user-consent only)
 Not included in bootstrap by design.
+Seed includes learned `symbol_policy` rows (per-symbol SL/TP adjustments).
 
 Release seed URL:
 - `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v1-20260216`

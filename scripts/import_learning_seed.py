@@ -36,6 +36,7 @@ LEARNING_TABLES: List[str] = [
     "symbol_learning_state",
     "signal_symbol_stats",
     "symbol_conclusions_v1",
+    "symbol_policy",
     "trade_features",
     "reflections_v2",
     "trade_reflections",
