@@ -249,6 +249,9 @@ remind_builder_approval() {
   echo "Reminder: approve builder fee for your wallet before first run:"
   echo "  https://atsetup.evplus.ai/"
   echo "If not approved, tracker/node2 auth can reject with 401/403."
+  echo "Node2 quick test (RIGHT):"
+  echo "  curl -X POST \"https://node2.evplus.ai/evclaw/info?key=\$HYPERLIQUID_ADDRESS\" -H \"Content-Type: application/json\" --data '{\"type\":\"meta\"}'"
+  echo "Wrong: /evclaw/meta or /evclaw/info without ?key=..."
 }
 
 ensure_openclaw_cli() {

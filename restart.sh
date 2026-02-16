@@ -19,6 +19,7 @@ SESSIONS=(
   # Core EVClaw
   [evclaw-cycle-trigger]="$EVCLAW_PYTHON cycle_trigger.py 2>&1"
   [evclaw-live-agent]="bash -c './run_hl_live_agent.sh 2>&1'"
+  [evclaw-live-monitor]="$EVCLAW_PYTHON live_monitor.py 2>&1"
   [evclaw-exit-decider]="bash -c 'set -a && source .env && set +a && export EVCLAW_EXIT_DECIDER_VENUES=\"\${EVCLAW_EXIT_DECIDER_VENUES:-\${EVCLAW_PERPS_EXIT_DECIDER_VENUES:-hyperliquid}}\" && export EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES=\"\${EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES:-\${EVCLAW_PERPS_EXIT_DECIDER_SYMBOL_PREFIXES:-}}\" && $EVCLAW_PYTHON -u llm_exit_decider.py 2>&1'"
   # Dedicated HIP3 exit decider (XYZ + hip3, isolated from global EXIT_DECIDER env).
   [evclaw-hip3-exit-decider]="bash -c 'set -a && source .env && set +a && $EVCLAW_PYTHON -u hip3_exit_decider.py 2>&1'"
@@ -41,6 +42,7 @@ ORDER=(
   evclaw-exit-decider
   evclaw-hip3-exit-decider
   evclaw-exit-outcome
+  evclaw-live-monitor
   evclaw-live-agent
   evclaw-cycle-trigger
 )

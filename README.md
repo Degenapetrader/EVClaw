@@ -166,6 +166,7 @@ Default runtime uses tmux sessions started by `./start.sh` (wrapper over `restar
 Core sessions include:
 - `evclaw-cycle-trigger`
 - `evclaw-live-agent`
+- `evclaw-live-monitor`
 - `evclaw-exit-decider`
 - `evclaw-hip3-exit-decider`
 - `evclaw-exit-outcome`
@@ -196,6 +197,7 @@ After bootstrap, these user-facing helper skills are available:
 - If SSE/node2 returns 401/403, approve builder fee for your wallet at `https://atsetup.evplus.ai/`.
 - If HL auth fails, verify `HYPERLIQUID_ADDRESS` and `HYPERLIQUID_AGENT_PRIVATE_KEY`.
 - If `HYPERLIQUID_API` appears in your `.env`, remove it and use `HYPERLIQUID_AGENT_PRIVATE_KEY`.
+- If you see `sr_limit_equity_missing`, check that `evclaw-live-monitor` is running (it writes `monitor_snapshots` used for SR-limit equity caps).
 - If processes are missing, run `./start.sh` again and inspect tmux sessions.
 
 ## Safety notice

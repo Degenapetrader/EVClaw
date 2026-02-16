@@ -51,6 +51,7 @@ DOTENV_PATH = ROOT_DIR / ".env"
 SESSION_NAMES = [
     "evclaw-cycle-trigger",
     "evclaw-live-agent",
+    "evclaw-live-monitor",
     "evclaw-fill-reconciler",
     "evclaw-exit-decider",
     "evclaw-hip3-exit-decider",

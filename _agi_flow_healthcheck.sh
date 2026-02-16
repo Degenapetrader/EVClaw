@@ -10,7 +10,7 @@ export RUNTIME_DIR
 export EVCLAW_DB_PATH="${DB}"
 export EVCLAW_RUNTIME_DIR="${RUNTIME_DIR}"
 export EVCLAW_DOCS_DIR="${DOCS_DIR}"
-REQ=(evclaw-cycle-trigger evclaw-live-agent evclaw-fill-reconciler evclaw-exit-decider evclaw-hip3-exit-decider evclaw-exit-outcome evclaw-decay evclaw-review evclaw-learning-reflector)
+REQ=(evclaw-cycle-trigger evclaw-live-agent evclaw-live-monitor evclaw-fill-reconciler evclaw-exit-decider evclaw-hip3-exit-decider evclaw-exit-outcome evclaw-decay evclaw-review evclaw-learning-reflector)
 
 restarted=()
 missing=()

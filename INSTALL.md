@@ -108,6 +108,7 @@ Wrong patterns (do not use):
 You can run each service in its own terminal:
 - `python3 cycle_trigger.py` (`evclaw-cycle-trigger`)
 - `bash run_hl_live_agent.sh` (`evclaw-live-agent`)
+- `python3 live_monitor.py` (`evclaw-live-monitor`)
 - `python3 -u llm_exit_decider.py` (`evclaw-exit-decider`)
 - `python3 -u hip3_exit_decider.py` (`evclaw-hip3-exit-decider`)
 - `python3 -u exit_outcome_worker.py` (`evclaw-exit-outcome`)
@@ -148,5 +149,7 @@ tmux capture-pane -pt evclaw-live-agent -S -80 | tail -n 40
   - If tracker/node2 auth returns 401/403, approve builder fee at `https://atsetup.evplus.ai/`.
 - Node endpoint issues:
   - Check `HYPERLIQUID_PRIVATE_NODE` (default `https://node2.evplus.ai/evclaw/info`).
+- SR-limit blocked with `sr_limit_equity_missing`:
+  - Ensure `evclaw-live-monitor` is running (it writes `monitor_snapshots` used by SR-limit equity safety checks).
 - Proxy/network issues:
   - If needed, set `HYPERLIQUID_PROXIES`.
