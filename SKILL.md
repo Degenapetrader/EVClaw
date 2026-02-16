@@ -261,7 +261,7 @@ lighter
 
 - Python 3.10+
 - Lighter env vars: `LIGHTER_BASE_URL`, `LIGHTER_ACCOUNT_INDEX`, `LIGHTER_API_KEY_PRIVATE_KEY`, `LIGHTER_API_KEY_INDEX`
-- Hyperliquid env vars: `HYPERLIQUID_ADDRESS`, `HYPERLIQUID_API`, optional `HYPERLIQUID_PRIVATE_NODE`, optional `EVCLAW_INCLUDE_WALLET_HIP3_FILLS`
+- Hyperliquid env vars: `HYPERLIQUID_ADDRESS` (main wallet address), `HYPERLIQUID_AGENT_PRIVATE_KEY` (delegated signer key; not main wallet private key), optional `HYPERLIQUID_PRIVATE_NODE`, optional `EVCLAW_INCLUDE_WALLET_HIP3_FILLS`
 - Venue controls: `EVCLAW_ENABLED_VENUES`, `HYPERLIQUID_PRIVATE_NODE`
 - Massive env var (HIP3 predator signals): `MASSIVE_API_KEY`
 - Tracker APIs are hosted externally via evplus tracker:

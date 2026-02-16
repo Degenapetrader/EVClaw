@@ -29,8 +29,21 @@ if ! command -v tmux >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Installing dependencies..."
-python3 -m pip install -r requirements.txt
+# Create venv if it does not exist.
+if [[ ! -d .venv ]]; then
+  echo "Creating virtual environment..."
+  python3 -m venv .venv
+fi
+
+# Resolve python: venv > system.
+EVCLAW_PYTHON="$DIR/.venv/bin/python3"
+if [[ ! -x "$EVCLAW_PYTHON" ]]; then
+  EVCLAW_PYTHON="python3"
+fi
+export EVCLAW_PYTHON
+
+echo "Installing dependencies (using $EVCLAW_PYTHON)..."
+"$EVCLAW_PYTHON" -m pip install -r requirements.txt
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
@@ -54,13 +67,19 @@ warn_if_missing_runtime_env() {
   if [[ -z "${HYPERLIQUID_ADDRESS:-}" ]]; then
     missing+=("HYPERLIQUID_ADDRESS")
   fi
-  if [[ -z "${HYPERLIQUID_API:-}" ]]; then
-    missing+=("HYPERLIQUID_API")
+  if [[ -z "${HYPERLIQUID_AGENT_PRIVATE_KEY:-}" ]]; then
+    missing+=("HYPERLIQUID_AGENT_PRIVATE_KEY")
   fi
 
   if ((${#missing[@]} > 0)); then
     echo "Warning: missing runtime env vars in .env: ${missing[*]}"
     echo "Bootstrap will continue. Set them before running ./start.sh"
+  fi
+
+  if [[ -n "${HYPERLIQUID_API:-}" ]]; then
+    echo "Warning: legacy env var HYPERLIQUID_API is set and is unsupported." >&2
+    echo "Use HYPERLIQUID_AGENT_PRIVATE_KEY (delegated agent signer key for HYPERLIQUID_ADDRESS)." >&2
+    echo "Do not use your main wallet private key here." >&2
   fi
 }
 
@@ -150,7 +169,7 @@ warn_if_missing_runtime_env
 
 mkdir -p state memory signals docs
 
-python3 - <<'PY'
+"$EVCLAW_PYTHON" - <<'PY'
 from ai_trader_db import AITraderDB
 from pathlib import Path
 
@@ -158,7 +177,7 @@ db = AITraderDB()
 print(f"DB initialized: {Path(db.db_path).resolve()}")
 PY
 
-python3 - <<'PY'
+"$EVCLAW_PYTHON" - <<'PY'
 import yaml
 with open("skill.yaml", "r", encoding="utf-8") as f:
     data = yaml.safe_load(f)

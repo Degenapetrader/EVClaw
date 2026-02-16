@@ -8,7 +8,7 @@ Legacy aliases are intentionally removed in this clean-slate OSS package.
 | Key | Default | Required | Purpose |
 |---|---|---|---|
 | `HYPERLIQUID_ADDRESS` | `""` | Yes | Trading wallet address. |
-| `HYPERLIQUID_API` | `""` | Yes | Trading API/private key used by adapters. |
+| `HYPERLIQUID_AGENT_PRIVATE_KEY` | `""` | Yes | Delegated agent signer private key for `HYPERLIQUID_ADDRESS` (not main wallet private key). |
 | `HYPERLIQUID_PRIVATE_NODE` | `https://node2.evplus/info` | No | Private node info endpoint. |
 | `HYPERLIQUID_PROXIES` | `""` | No | Optional comma-separated proxy list for public requests. |
 | `EVCLAW_DB_PATH` | `./ai_trader.db` | No | SQLite DB location. |

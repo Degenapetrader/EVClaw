@@ -4,6 +4,12 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
+# Resolve python: venv > system.
+EVCLAW_PYTHON="$DIR/.venv/bin/python3"
+if [[ ! -x "$EVCLAW_PYTHON" ]]; then
+  EVCLAW_PYTHON="python3"
+fi
+
 # Always load env (vault/proxies/etc.)
 set -a
 source .env
@@ -18,7 +24,7 @@ while true; do
   echo "$(date -u '+%F %T UTC') starting live_agent" | tee -a "$LOG"
 
   # AGI-only default: live_agent.py (no args) => `run --from-db --continuous`
-  python3 live_agent.py \
+  $EVCLAW_PYTHON live_agent.py \
     >>"$LOG" 2>&1
 
   rc=$?

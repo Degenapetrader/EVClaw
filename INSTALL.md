@@ -14,7 +14,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 cp .env.example .env
-# edit .env (required: HYPERLIQUID_ADDRESS, HYPERLIQUID_API)
+# edit .env (required: HYPERLIQUID_ADDRESS, HYPERLIQUID_AGENT_PRIVATE_KEY)
+# HYPERLIQUID_ADDRESS = main wallet address
+# HYPERLIQUID_AGENT_PRIVATE_KEY = delegated agent signer key
+# Do not use your main wallet private key.
 ./bootstrap.sh
 ./start.sh
 ```
@@ -75,7 +78,8 @@ tmux capture-pane -pt evclaw-live-agent -S -80 | tail -n 40
   - Ensure `openclaw` is installed and authenticated.
   - Verify agent model names in `.env` (`EVCLAW_*_MODEL`).
 - Missing required env vars:
-  - Set `HYPERLIQUID_ADDRESS` and `HYPERLIQUID_API` in `.env`.
+  - Set `HYPERLIQUID_ADDRESS` (main wallet address) and `HYPERLIQUID_AGENT_PRIVATE_KEY` (delegated signer key) in `.env`.
+  - Remove legacy `HYPERLIQUID_API` if present.
 - Tracker unreachable:
   - Check `EVCLAW_SSE_HOST`, `EVCLAW_SSE_PORT`, `EVCLAW_SSE_ENDPOINT`.
   - Verify `curl -ks https://tracker.evplus.ai/health`.

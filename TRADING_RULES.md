@@ -22,10 +22,11 @@ Signals → ContextBuilderV2 → TradingBrain (me) → DynamicRiskManager → Ex
   - `hl_enabled: true`
 
 **Hyperliquid account (single unified wallet):**
-- **Wallet account:** uses `HYPERLIQUID_ADDRESS` / `HYPERLIQUID_API`
+- **Wallet account:** uses `HYPERLIQUID_ADDRESS` / `HYPERLIQUID_AGENT_PRIVATE_KEY`
+  - `HYPERLIQUID_AGENT_PRIVATE_KEY` is a delegated agent signer key for `HYPERLIQUID_ADDRESS` (not your main wallet private key)
   - **HIP3 (`xyz:*`) trades:** routed with dex context and a unified signer
   - **Perps and HIP3:** both use the same configured wallet address
-  - If `HYPERLIQUID_API` is missing, execution is blocked (safety)
+  - If `HYPERLIQUID_AGENT_PRIVATE_KEY` is missing, execution is blocked (safety)
 
 ---
 

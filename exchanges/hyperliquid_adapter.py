@@ -158,7 +158,7 @@ class HyperliquidAdapter(ExchangeAdapter):
         # HIP3 wallet override (xyz: symbols only)
         self._hip3_wallet = None                   # eth_account LocalAccount
         self._hip3_address: Optional[str] = None   # HIP3 wallet address (same as _address in unified mode)
-        self._wallet_fallback = None               # Optional fallback signer (typically HYPERLIQUID_API)
+        self._wallet_fallback = None               # Optional fallback signer (typically HYPERLIQUID_AGENT_PRIVATE_KEY)
 
         # SDK Info — metadata only (no Exchange class!)
         self._info: Optional[HLInfo] = None
@@ -577,7 +577,8 @@ class HyperliquidAdapter(ExchangeAdapter):
             return True
 
         address = os.getenv("HYPERLIQUID_ADDRESS", "").strip()
-        private_key = os.getenv("HYPERLIQUID_API", "").strip()
+        agent_signer_key = os.getenv("HYPERLIQUID_AGENT_PRIVATE_KEY", "").strip()
+        legacy_private_key = os.getenv("HYPERLIQUID_API", "").strip()
         private_node = os.getenv("HYPERLIQUID_PRIVATE_NODE", "https://node2.evplus/info").strip()
         self._private_info_base_url = (
             self._normalize_base_url(private_node) if private_node else None
@@ -588,14 +589,25 @@ class HyperliquidAdapter(ExchangeAdapter):
         if proxy_str:
             self._proxies = [p.strip() for p in proxy_str.split(",") if p.strip()]
 
-        if not address or not private_key:
+        if legacy_private_key:
+            self._last_init_error = "legacy_env_name"
+            self.log.error(
+                "Unsupported legacy env var HYPERLIQUID_API detected. "
+                "Use HYPERLIQUID_AGENT_PRIVATE_KEY (delegated agent signer key for HYPERLIQUID_ADDRESS)."
+            )
+            return False
+
+        if not address or not agent_signer_key:
             self._last_init_error = "missing_env"
-            self.log.error("Hyperliquid env missing: HYPERLIQUID_ADDRESS / HYPERLIQUID_API")
+            self.log.error(
+                "Hyperliquid env missing: HYPERLIQUID_ADDRESS / HYPERLIQUID_AGENT_PRIVATE_KEY. "
+                "Set main wallet address + delegated agent signer key (not main wallet private key)."
+            )
             return False
 
         try:
-            # 1. Wallet from private key
-            self.wallet = Account.from_key(private_key)
+            # 1. Wallet from delegated agent signer key
+            self.wallet = Account.from_key(agent_signer_key)
             self._address = address
             self._vault_address = None
             # Unified wallet model: same signer/address for all venue flows.

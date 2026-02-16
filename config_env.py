@@ -182,7 +182,7 @@ def apply_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
                 "Config note: EVCLAW_MIRROR_PERPS_TO_HL_WALLET is deprecated "
                 "because Hyperliquid no longer uses a split wallet venue."
             )
-    if not new_any and not env_present("HYPERLIQUID_API"):
+    if not new_any and not env_present("HYPERLIQUID_AGENT_PRIVATE_KEY"):
         # Use YAML defaults only.
         pass
 

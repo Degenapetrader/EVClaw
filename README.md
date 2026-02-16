@@ -12,7 +12,7 @@ It is designed to run on a fresh Linux VPS with no dependency on your private lo
 - Ingests market/tracker data from internet endpoints.
 - Builds opportunities and ranks candidates.
 - Uses OpenClaw agents for entry and exit decisions.
-- Executes through one wallet identity (`HYPERLIQUID_ADDRESS` + `HYPERLIQUID_API`).
+- Executes with one wallet identity: `HYPERLIQUID_ADDRESS` + delegated signer `HYPERLIQUID_AGENT_PRIVATE_KEY`.
 - Runs deterministic hourly/15m maintenance checks for safety.
 
 ## AGI flow
@@ -60,7 +60,10 @@ Default target is `~/.openclaw/skills` (override with `EVCLAW_OPENCLAW_SKILLS_DI
 
 At minimum set:
 - `HYPERLIQUID_ADDRESS`
-- `HYPERLIQUID_API`
+- `HYPERLIQUID_AGENT_PRIVATE_KEY`
+- `HYPERLIQUID_ADDRESS` is the main wallet address being traded.
+- `HYPERLIQUID_AGENT_PRIVATE_KEY` is the delegated agent signer key authorized for that wallet.
+- Do not use your main wallet private key.
 
 Common network defaults:
 - tracker SSE host: `tracker.evplus.ai:8443`
@@ -128,7 +131,8 @@ After bootstrap, these user-facing helper skills are available:
 
 - If no trades appear, verify OpenClaw agent IDs and provider config.
 - If SSE fails, verify tracker endpoint/key in `.env`.
-- If HL auth fails, verify `HYPERLIQUID_ADDRESS` and `HYPERLIQUID_API`.
+- If HL auth fails, verify `HYPERLIQUID_ADDRESS` and `HYPERLIQUID_AGENT_PRIVATE_KEY`.
+- If `HYPERLIQUID_API` appears in your `.env`, remove it and use `HYPERLIQUID_AGENT_PRIVATE_KEY`.
 - If processes are missing, run `./start.sh` again and inspect tmux sessions.
 
 ## Safety notice

@@ -6,6 +6,12 @@ ROOT_DIR="${EVCLAW_ROOT:-$SCRIPT_ROOT_DIR}"
 ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
 cd "$ROOT_DIR"
 
+# Resolve python: venv > system.
+EVCLAW_PYTHON="$ROOT_DIR/.venv/bin/python3"
+if [[ ! -x "$EVCLAW_PYTHON" ]]; then
+  EVCLAW_PYTHON="python3"
+fi
+
 OPENCLAW_CMD="${OPENCLAW_CMD:-openclaw}"
 CRON_AGENT="${EVCLAW_OPENCLAW_CRON_AGENT:-main}"
 CRON_CHANNEL="${EVCLAW_OPENCLAW_CRON_CHANNEL:-main}"
@@ -37,9 +43,10 @@ Workdir: $ROOT_DIR
 DB: $DB_PATH
 
 Run:
-1) cd $ROOT_DIR && python3 hourly_ops.py --db $DB_PATH --json-out $REPORT_PATH --summary-out $SUMMARY_PATH
+1) cd $ROOT_DIR && $EVCLAW_PYTHON hourly_ops.py --db $DB_PATH --json-out $REPORT_PATH --summary-out $SUMMARY_PATH
 2) Read and return ONLY summary lines from $SUMMARY_PATH (max 4 lines).
 3) If runner exits non-zero, report failure and include top error from $REPORT_PATH.
+4) Do not request, print, or modify secret keys. Runtime auth uses HYPERLIQUID_AGENT_PRIVATE_KEY (agent signer key for HYPERLIQUID_ADDRESS).
 MSG
 )"
 

@@ -8,19 +8,25 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Resolve python: venv > system.
+EVCLAW_PYTHON="$DIR/.venv/bin/python3"
+if [[ ! -x "$EVCLAW_PYTHON" ]]; then
+  EVCLAW_PYTHON="python3"
+fi
+
 declare -A SESSIONS
 SESSIONS=(
   # Core EVClaw
-  [evclaw-cycle-trigger]="python3 cycle_trigger.py 2>&1"
+  [evclaw-cycle-trigger]="$EVCLAW_PYTHON cycle_trigger.py 2>&1"
   [evclaw-live-agent]="bash -c './run_hl_live_agent.sh 2>&1'"
-  [evclaw-exit-decider]="bash -c 'set -a && source .env && set +a && export EVCLAW_EXIT_DECIDER_VENUES=\"\${EVCLAW_EXIT_DECIDER_VENUES:-\${EVCLAW_PERPS_EXIT_DECIDER_VENUES:-hyperliquid}}\" && export EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES=\"\${EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES:-\${EVCLAW_PERPS_EXIT_DECIDER_SYMBOL_PREFIXES:-}}\" && python3 -u llm_exit_decider.py 2>&1'"
+  [evclaw-exit-decider]="bash -c 'set -a && source .env && set +a && export EVCLAW_EXIT_DECIDER_VENUES=\"\${EVCLAW_EXIT_DECIDER_VENUES:-\${EVCLAW_PERPS_EXIT_DECIDER_VENUES:-hyperliquid}}\" && export EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES=\"\${EVCLAW_EXIT_DECIDER_SYMBOL_PREFIXES:-\${EVCLAW_PERPS_EXIT_DECIDER_SYMBOL_PREFIXES:-}}\" && $EVCLAW_PYTHON -u llm_exit_decider.py 2>&1'"
   # Dedicated HIP3 exit decider (XYZ + hip3, isolated from global EXIT_DECIDER env).
-  [evclaw-hip3-exit-decider]="bash -c 'set -a && source .env && set +a && python3 -u hip3_exit_decider.py 2>&1'"
-  [evclaw-exit-outcome]="bash -c 'set -a && source .env && set +a && python3 -u exit_outcome_worker.py 2>&1'"
-  [evclaw-decay]="python3 decay_worker.py --signal-flip-only --notify-only 2>&1"
-  [evclaw-review]="python3 position_review_worker.py --record-holds 2>&1"
-  [evclaw-fill-reconciler]="python3 run_fill_reconciler.py --mode hybrid 2>&1"
-  [evclaw-learning-reflector]="python3 learning_reflector_worker.py 2>&1"
+  [evclaw-hip3-exit-decider]="bash -c 'set -a && source .env && set +a && $EVCLAW_PYTHON -u hip3_exit_decider.py 2>&1'"
+  [evclaw-exit-outcome]="bash -c 'set -a && source .env && set +a && $EVCLAW_PYTHON -u exit_outcome_worker.py 2>&1'"
+  [evclaw-decay]="$EVCLAW_PYTHON decay_worker.py --signal-flip-only --notify-only 2>&1"
+  [evclaw-review]="$EVCLAW_PYTHON position_review_worker.py --record-holds 2>&1"
+  [evclaw-fill-reconciler]="$EVCLAW_PYTHON run_fill_reconciler.py --mode hybrid 2>&1"
+  [evclaw-learning-reflector]="$EVCLAW_PYTHON learning_reflector_worker.py 2>&1"
 )
 
 # Order matters:

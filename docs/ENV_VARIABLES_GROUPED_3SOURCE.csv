@@ -8,7 +8,7 @@ tracker,EVCLAW_TRACKER_HIP3_PREDATOR_URL,${EVCLAW_TRACKER_BASE_URL}/api/hip3/pre
 tracker,EVCLAW_TRACKER_HIP3_SYMBOLS_URL,${EVCLAW_TRACKER_BASE_URL}/api/hip3-symbols,no,HIP3 symbols URL
 tracker,EVCLAW_TRACKER_SYMBOL_URL_TEMPLATE,${EVCLAW_TRACKER_BASE_URL}/api/symbols/{symbol_upper}.json,no,Per-symbol tracker URL template
 wallet,HYPERLIQUID_ADDRESS,,yes,Trading wallet address
-wallet,HYPERLIQUID_API,,yes,Trading API/private key
+wallet,HYPERLIQUID_AGENT_PRIVATE_KEY,,yes,Delegated agent signer key for HYPERLIQUID_ADDRESS not main wallet private key
 runtime,EVCLAW_DB_PATH,./ai_trader.db,no,SQLite DB path
 runtime,EVCLAW_RUNTIME_DIR,./state,no,Runtime artifacts directory
 runtime,EVCLAW_MEMORY_DIR,./memory,no,Runtime memory directory

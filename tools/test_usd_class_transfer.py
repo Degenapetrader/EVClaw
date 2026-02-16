@@ -2,7 +2,7 @@
 """Test: transfer USD collateral between perp and spot on Hyperliquid.
 
 Purpose (operator): verify we can move collateral (USDC) from perp margin to spot
-(and back) using the existing HYPERLIQUID_API key.
+(and back) using the delegated HYPERLIQUID_AGENT_PRIVATE_KEY signer key.
 
 This uses the Hyperliquid SDK Exchange.usd_class_transfer() call.
 
@@ -78,12 +78,12 @@ def main() -> int:
     args = ap.parse_args()
 
     base_url = os.getenv("HYPERLIQUID_PUBLIC_URL", "https://api.hyperliquid.xyz").strip().rstrip("/")
-    priv = (os.getenv("HYPERLIQUID_API", "") or "").strip()
+    priv = (os.getenv("HYPERLIQUID_AGENT_PRIVATE_KEY", "") or "").strip()
     addr = (os.getenv("HYPERLIQUID_ADDRESS", "") or "").strip()
     vault = (os.getenv("VAULT_ADDRESS", "") or "").strip() or None
 
     if not priv or not addr:
-        raise SystemExit("Missing HYPERLIQUID_API or HYPERLIQUID_ADDRESS in env")
+        raise SystemExit("Missing HYPERLIQUID_AGENT_PRIVATE_KEY or HYPERLIQUID_ADDRESS in env")
 
     # Pre balances (spot USDC + perp withdrawable)
     spot_before = _get_spot_usdc(base_url, addr)
