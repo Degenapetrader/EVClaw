@@ -14,10 +14,14 @@ fi
 
 OPENCLAW_CMD="${OPENCLAW_CMD:-openclaw}"
 CRON_AGENT="${EVCLAW_OPENCLAW_CRON_AGENT:-main}"
-CRON_CHANNEL="${EVCLAW_OPENCLAW_CRON_CHANNEL:-main}"
-CRON_TO="${EVCLAW_OPENCLAW_CRON_TO:-}"
-if [[ -z "${CRON_CHANNEL//[[:space:]]/}" && -z "${CRON_TO//[[:space:]]/}" ]]; then
+CRON_CHANNEL_RAW="${EVCLAW_OPENCLAW_CRON_CHANNEL:-}"
+CRON_TO_RAW="${EVCLAW_OPENCLAW_CRON_TO:-}"
+CRON_CHANNEL="${CRON_CHANNEL_RAW//[[:space:]]/}"
+CRON_TO="${CRON_TO_RAW//[[:space:]]/}"
+AUTO_CHANNEL_FALLBACK="0"
+if [[ -z "$CRON_CHANNEL" && -z "$CRON_TO" ]]; then
   CRON_CHANNEL="main"
+  AUTO_CHANNEL_FALLBACK="1"
 fi
 
 DB_PATH="${EVCLAW_DB_PATH:-$ROOT_DIR/ai_trader.db}"
@@ -108,6 +112,8 @@ add_cron_job() {
   local name="$1"
   local expr="$2"
   local message="$3"
+  local try_channel="$4"
+  local try_to="$5"
 
   local cmd=(
     "$OPENCLAW_CMD" cron add
@@ -116,11 +122,11 @@ add_cron_job() {
     --message "$message"
     --agent "$CRON_AGENT"
   )
-  if [[ -n "$CRON_CHANNEL" ]]; then
-    cmd+=(--channel "$CRON_CHANNEL")
+  if [[ -n "$try_channel" ]]; then
+    cmd+=(--channel "$try_channel")
   fi
-  if [[ -n "$CRON_TO" ]]; then
-    cmd+=(--to "$CRON_TO")
+  if [[ -n "$try_to" ]]; then
+    cmd+=(--to "$try_to")
   fi
   "${cmd[@]}" >/dev/null
 }
@@ -129,23 +135,34 @@ add_system_event_job() {
   local name="$1"
   local expr="$2"
   local text="$3"
+  local try_channel="$4"
+  local try_to="$5"
 
   local payload
   payload="$(
-    NAME="$name" EXPR="$expr" TEXT="$text" python3 - <<'PY'
+    NAME="$name" EXPR="$expr" TEXT="$text" TRY_CHANNEL="$try_channel" TRY_TO="$try_to" python3 - <<'PY'
 import json
 import os
 
+delivery = {"mode": "announce"}
+channel = str(os.environ.get("TRY_CHANNEL") or "").strip()
+to = str(os.environ.get("TRY_TO") or "").strip()
+if channel:
+    delivery["channel"] = channel
+if to:
+    delivery["to"] = to
+
+job = {
+    "name": os.environ.get("NAME", ""),
+    "schedule": {"kind": "cron", "expr": os.environ.get("EXPR", "0 * * * *")},
+    "payload": {"kind": "systemEvent", "text": os.environ.get("TEXT", "")},
+    "sessionTarget": "isolated",
+}
+if delivery.get("channel") or delivery.get("to"):
+    job["delivery"] = delivery
+
 print(
-    json.dumps(
-        {
-            "name": os.environ.get("NAME", ""),
-            "schedule": {"kind": "cron", "expr": os.environ.get("EXPR", "0 * * * *")},
-            "payload": {"kind": "systemEvent", "text": os.environ.get("TEXT", "")},
-            "sessionTarget": "isolated",
-            "delivery": {"mode": "announce", "channel": "main"},
-        }
-    )
+    json.dumps(job)
 )
 PY
   )"
@@ -155,7 +172,29 @@ PY
   fi
 
   # Fallback for OpenClaw builds that only support --message.
-  add_cron_job "$name" "$expr" "$text"
+  add_cron_job "$name" "$expr" "$text" "$try_channel" "$try_to"
+}
+
+install_deterministic_job() {
+  if add_cron_job "$JOB_NAME" "*/15 * * * *" "$hourly_message" "$CRON_CHANNEL" "$CRON_TO"; then
+    return 0
+  fi
+  if [[ "$AUTO_CHANNEL_FALLBACK" == "1" ]]; then
+    add_cron_job "$JOB_NAME" "*/15 * * * *" "$hourly_message" "webchat" ""
+    return 0
+  fi
+  return 1
+}
+
+install_report_job() {
+  if add_system_event_job "$REPORT_JOB_NAME" "0 * * * *" "$report_message" "$CRON_CHANNEL" "$CRON_TO"; then
+    return 0
+  fi
+  if [[ "$AUTO_CHANNEL_FALLBACK" == "1" ]]; then
+    add_system_event_job "$REPORT_JOB_NAME" "0 * * * *" "$report_message" "webchat" ""
+    return 0
+  fi
+  return 1
 }
 
 remove_jobs_by_name "$JOB_NAME"
@@ -163,8 +202,8 @@ remove_jobs_by_name "$REPORT_JOB_NAME"
 remove_jobs_by_name "$LEGACY_HEALTH_NAME"
 remove_jobs_by_name "$LEGACY_HOURLY_NAME"
 
-add_cron_job "$JOB_NAME" "*/15 * * * *" "$hourly_message"
-add_system_event_job "$REPORT_JOB_NAME" "0 * * * *" "$report_message"
+install_deterministic_job
+install_report_job
 
 echo "OpenClaw cron jobs installed:"
 echo "- $JOB_NAME"
