@@ -8,6 +8,7 @@ Run only when the user explicitly agrees.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -16,6 +17,8 @@ import sqlite3
 import sys
 import tarfile
 import tempfile
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -30,6 +33,12 @@ from ai_trader_db import AITraderDB
 
 DEFAULT_DB_PATH = ROOT / "ai_trader.db"
 DEFAULT_MEMORY_DIR = ROOT / "memory"
+DEFAULT_RELEASE_TAG = "evclaw-learning-seed-v1-20260216"
+DEFAULT_RELEASE_BASE = (
+    f"https://github.com/Degenapetrader/EVClaw/releases/download/{DEFAULT_RELEASE_TAG}"
+)
+DEFAULT_RELEASE_SEED_URL = f"{DEFAULT_RELEASE_BASE}/evclaw-learning-seed.tgz"
+DEFAULT_RELEASE_SHA256_URL = f"{DEFAULT_RELEASE_BASE}/evclaw-learning-seed.tgz.sha256"
 
 LEARNING_TABLES: List[str] = [
     "learning_state_kv",
@@ -65,6 +74,33 @@ def _safe_extract_tar(src: Path, dst_dir: Path) -> None:
             if not str(target).startswith(str(dst_root) + os.sep) and target != dst_root:
                 raise RuntimeError(f"unsafe tar entry: {member.name}")
         tf.extractall(path=str(dst_root))
+
+
+def _download_file(url: str, dst: Path) -> None:
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "EVClawLearningSeedImporter/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as response, dst.open("wb") as out:
+        shutil.copyfileobj(response, out)
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _parse_sha256_file(path: Path) -> str:
+    txt = path.read_text(encoding="utf-8", errors="replace").strip()
+    if not txt:
+        raise RuntimeError(f"empty sha256 file: {path}")
+    token = txt.split()[0].strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", token):
+        raise RuntimeError(f"invalid sha256 content: {txt[:120]}")
+    return token
 
 
 def _table_columns(conn: sqlite3.Connection, schema: str, table: str) -> List[str]:
@@ -145,8 +181,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Import optional EVClaw learning seed.")
     parser.add_argument(
         "--seed",
-        required=True,
-        help="Path to learning seed archive (.tgz/.tar.gz) or learning_seed.db",
+        required=False,
+        help="Path to learning seed archive (.tgz/.tar.gz) or learning_seed.db. If omitted, downloads official release seed.",
+    )
+    parser.add_argument(
+        "--seed-url",
+        default=os.getenv("EVCLAW_LEARNING_SEED_URL", DEFAULT_RELEASE_SEED_URL),
+        help="Seed archive URL used when --seed is omitted (default: official EVClaw release).",
+    )
+    parser.add_argument(
+        "--seed-sha256-url",
+        default=os.getenv("EVCLAW_LEARNING_SEED_SHA256_URL", DEFAULT_RELEASE_SHA256_URL),
+        help="SHA256 URL used to verify downloaded seed when --seed is omitted.",
+    )
+    parser.add_argument(
+        "--skip-sha256-verify",
+        action="store_true",
+        help="Skip SHA256 verification for downloaded seed (not recommended).",
     )
     parser.add_argument(
         "--db-path",
@@ -166,9 +217,6 @@ def main() -> int:
     args = parser.parse_args()
 
     apply_changes = bool(args.apply)
-    seed_input = Path(args.seed).expanduser().resolve()
-    if not seed_input.exists():
-        raise SystemExit(f"seed file not found: {seed_input}")
 
     target_db = Path(args.db_path).expanduser().resolve()
     target_mem = Path(args.memory_dir).expanduser().resolve()
@@ -178,6 +226,44 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="evclaw-learning-seed-") as td:
         tmp_dir = Path(td)
+        seed_source = ""
+        if args.seed:
+            seed_input = Path(args.seed).expanduser().resolve()
+            if not seed_input.exists():
+                raise SystemExit(f"seed file not found: {seed_input}")
+            seed_source = f"path:{seed_input}"
+        else:
+            seed_url = str(args.seed_url or "").strip()
+            if not seed_url:
+                raise SystemExit("seed not provided and seed URL is empty")
+            seed_input = tmp_dir / "evclaw-learning-seed.tgz"
+            try:
+                _download_file(seed_url, seed_input)
+            except urllib.error.URLError as exc:
+                raise SystemExit(f"failed to download seed from {seed_url}: {exc}") from exc
+            except Exception as exc:
+                raise SystemExit(f"failed to download seed from {seed_url}: {exc}") from exc
+            seed_source = f"url:{seed_url}"
+
+            if not bool(args.skip_sha256_verify):
+                sha_url = str(args.seed_sha256_url or "").strip()
+                if not sha_url:
+                    raise SystemExit("seed SHA256 URL is empty; set --seed-sha256-url or use --skip-sha256-verify")
+                sha_path = tmp_dir / "evclaw-learning-seed.tgz.sha256"
+                try:
+                    _download_file(sha_url, sha_path)
+                except urllib.error.URLError as exc:
+                    raise SystemExit(f"failed to download seed sha256 from {sha_url}: {exc}") from exc
+                except Exception as exc:
+                    raise SystemExit(f"failed to download seed sha256 from {sha_url}: {exc}") from exc
+                expected = _parse_sha256_file(sha_path)
+                actual = _file_sha256(seed_input)
+                if actual.lower() != expected.lower():
+                    raise SystemExit(
+                        "seed sha256 mismatch: "
+                        f"expected={expected} actual={actual} source={seed_url}"
+                    )
+
         if seed_input.suffix.lower() == ".db":
             seed_db = seed_input
             seed_manifest = None
@@ -248,6 +334,7 @@ def main() -> int:
     mode = "APPLY" if apply_changes else "DRY_RUN"
     print(f"mode={mode}")
     print(f"target_db={target_db}")
+    print(f"seed_source={seed_source}")
     print(f"seed_input={seed_input}")
     if exported_manifest:
         print("seed_manifest_kind=" + str(exported_manifest.get("kind") or "unknown"))

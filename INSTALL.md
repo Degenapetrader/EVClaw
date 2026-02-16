@@ -60,18 +60,23 @@ Release seed URL:
 
 Import command:
 ```bash
-curl -L -o /tmp/evclaw-learning-seed.tgz \
-  https://github.com/Degenapetrader/EVClaw/releases/download/evclaw-learning-seed-v1-20260216/evclaw-learning-seed.tgz
-curl -L -o /tmp/evclaw-learning-seed.tgz.sha256 \
-  https://github.com/Degenapetrader/EVClaw/releases/download/evclaw-learning-seed-v1-20260216/evclaw-learning-seed.tgz.sha256
-cd /tmp && sha256sum -c evclaw-learning-seed.tgz.sha256
 cd /path/to/evclaw
-python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz --apply
+# Dry-run (default): auto-downloads official release seed + verifies SHA256.
+python3 scripts/import_learning_seed.py
+
+# Apply after explicit user approval.
+python3 scripts/import_learning_seed.py --apply
 ```
 
 Dry-run preview:
 ```bash
-python3 scripts/import_learning_seed.py --seed /tmp/evclaw-learning-seed.tgz
+python3 scripts/import_learning_seed.py
+```
+
+Custom seed file (optional):
+```bash
+python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz
+python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz --apply
 ```
 
 For OpenClaw agents:
