@@ -64,6 +64,46 @@ if [[ "${EVCLAW_INSTALL_LIGHTER_DEPS:-0}" == "1" || "${EVCLAW_INSTALL_LIGHTER_DE
   fi
 fi
 
+verify_core_python_deps() {
+  "$EVCLAW_PYTHON" - <<'PY'
+import importlib
+import sys
+
+checks = [
+    ("aiohttp", "aiohttp"),
+    ("aiohttp_sse_client", "aiohttp-sse-client"),
+    ("dotenv", "python-dotenv"),
+    ("requests", "requests"),
+    ("yaml", "pyyaml"),
+    ("eth_account", "eth-account"),
+    ("hyperliquid.info", "hyperliquid-python-sdk"),
+]
+
+missing = []
+for module_name, package_name in checks:
+    try:
+        importlib.import_module(module_name)
+    except Exception as exc:
+        missing.append((module_name, package_name, str(exc)))
+
+if missing:
+    print("Dependency check failed after requirements install.", file=sys.stderr)
+    for module_name, package_name, err in missing:
+        print(
+            f"  - module '{module_name}' (package '{package_name}') missing: {err}",
+            file=sys.stderr,
+        )
+    print("", file=sys.stderr)
+    print("Fix:", file=sys.stderr)
+    print("  ./.venv/bin/python3 -m pip install -r requirements.txt", file=sys.stderr)
+    raise SystemExit(1)
+
+print("Core dependencies verified.")
+PY
+}
+
+verify_core_python_deps
+
 if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "Created .env from template."

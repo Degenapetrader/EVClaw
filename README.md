@@ -118,6 +118,19 @@ Common network defaults:
 - HL private node/info endpoint: `https://node2.evplus.ai/evclaw/info` (as configured in `.env`)
 - Before first run, approve builder fee for your wallet: `https://atsetup.evplus.ai/`
 
+Node2 auth test (RIGHT way):
+```bash
+curl -X POST "https://node2.evplus.ai/evclaw/info?key=$HYPERLIQUID_ADDRESS" \
+  -H "Content-Type: application/json" \
+  --data '{"type":"meta"}'
+```
+
+Wrong patterns (do not use):
+- `POST /evclaw/meta`
+- `POST /evclaw/status`
+- `POST /evclaw/info` without `?key=...`
+- putting wallet address in JSON body instead of query `key`
+
 ## Trading modes (important)
 
 EVClaw supports 3 top-level trading modes:

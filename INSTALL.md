@@ -91,6 +91,19 @@ EVClaw is network-first and expects EVPlus services by default:
 - Tracker SSE/API: `tracker.evplus.ai` (port `8443`, endpoint `/sse/tracker`)
 - Private node: `https://node2.evplus.ai/evclaw/info`
 
+Node2 auth test (RIGHT way):
+```bash
+curl -X POST "https://node2.evplus.ai/evclaw/info?key=$HYPERLIQUID_ADDRESS" \
+  -H "Content-Type: application/json" \
+  --data '{"type":"meta"}'
+```
+
+Wrong patterns (do not use):
+- `POST /evclaw/meta`
+- `POST /evclaw/status`
+- `POST /evclaw/info` without `?key=...`
+- putting wallet address in JSON body instead of query `key`
+
 ## Run Without tmux (Optional)
 You can run each service in its own terminal:
 - `python3 cycle_trigger.py` (`evclaw-cycle-trigger`)
