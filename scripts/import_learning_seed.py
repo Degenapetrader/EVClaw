@@ -340,6 +340,18 @@ def main() -> int:
     print("imported_rows_by_table=" + json.dumps(imported, sort_keys=True))
     print("skipped_tables=" + json.dumps(skipped, sort_keys=True))
     print(f"context_feature_stats={context_status}")
+    if "learning_state_kv" in imported:
+        print(f"learning_state_kv_rows={int(imported.get('learning_state_kv') or 0)}")
+    symbol_policy_rows = int(imported.get("symbol_policy") or 0)
+    if symbol_policy_rows > 0:
+        print(f"symbol_policy_rows={symbol_policy_rows}")
+    else:
+        symbol_policy_status = str(skipped.get("symbol_policy") or "0_rows")
+        print(f"symbol_policy_rows=0")
+        print(
+            "note=symbol_policy is optional; empty rows are valid depending on seed version/source"
+        )
+        print(f"symbol_policy_status={symbol_policy_status}")
     if not apply_changes:
         print("note=rerun with --apply to execute the import")
     return 0

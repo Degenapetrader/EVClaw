@@ -45,6 +45,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # edit .env with your values
 ./bootstrap.sh
+# Optional warm-start preview (dry-run): python3 scripts/import_learning_seed.py
 ./start.sh
 ```
 
@@ -68,8 +69,8 @@ Default target is `~/.openclaw/skills` (override with `EVCLAW_OPENCLAW_SKILLS_DI
 
 This is optional and intentionally NOT part of `bootstrap.sh`.
 Use it only when the user explicitly agrees.
-The seed includes learned `symbol_policy` rows (per-symbol SL/TP adjustments).
-Pattern-learning state is imported via `learning_state_kv` (`patterns`/`adjustments`), not a `pattern_stats` SQL table.
+Core learning state imports from `learning_state_kv` (`patterns`/`adjustments`), not a `pattern_stats` SQL table.
+`symbol_policy` rows are optional and may be empty depending on source history/release.
 
 Maintainer side (export from `hl-trader`):
 
@@ -88,6 +89,10 @@ python3 scripts/import_learning_seed.py
 # Apply after explicit user approval.
 python3 scripts/import_learning_seed.py --apply
 ```
+
+Current official release seed note (v1, 2026-02-16):
+- `learning_state_kv`: populated
+- `symbol_policy`: `0` rows (expected for this version)
 
 OpenClaw agent instruction:
 - Ask for explicit user consent before importing learning seed.

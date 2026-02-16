@@ -254,6 +254,14 @@ remind_builder_approval() {
   echo "Wrong: /evclaw/meta or /evclaw/info without ?key=..."
 }
 
+remind_learning_seed_option() {
+  echo "Optional learning warm-start (dry-run first, user-consent only):"
+  echo "  python3 scripts/import_learning_seed.py"
+  echo "Then apply only after explicit confirmation:"
+  echo "  python3 scripts/import_learning_seed.py --apply"
+  echo "Note: symbol_policy rows are optional and may be 0 for some seed versions."
+}
+
 ensure_openclaw_cli() {
   if ! command -v openclaw >/dev/null 2>&1; then
     echo "openclaw is required but was not found in PATH." >&2
@@ -358,6 +366,7 @@ ensure_openclaw_skill_link
 install_openclaw_helper_skills
 warn_if_missing_runtime_env
 remind_builder_approval
+remind_learning_seed_option
 
 mkdir -p state memory signals docs
 

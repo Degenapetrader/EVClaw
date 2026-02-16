@@ -21,6 +21,7 @@ cp .env.example .env
 # Do not use your main wallet private key.
 # approve builder fee for your wallet: https://atsetup.evplus.ai/
 ./bootstrap.sh
+# Optional warm-start preview (dry-run): python3 scripts/import_learning_seed.py
 ./start.sh
 ```
 
@@ -53,11 +54,15 @@ Optional Lighter dependency install:
 
 ## Optional learning warm-start (user-consent only)
 Not included in bootstrap by design.
-Seed includes learned `symbol_policy` rows (per-symbol SL/TP adjustments).
-Pattern-learning state is carried in `learning_state_kv` (`patterns`/`adjustments`) rather than a `pattern_stats` SQL table.
+Core learning state is carried in `learning_state_kv` (`patterns`/`adjustments`) rather than `pattern_stats`.
+`symbol_policy` rows are optional and can be empty depending on source history/release.
 
 Release seed URL:
 - `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v1-20260216`
+
+Current official release seed note (v1, 2026-02-16):
+- `learning_state_kv`: populated
+- `symbol_policy`: `0` rows (expected for this version)
 
 Import command:
 ```bash
