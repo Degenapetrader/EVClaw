@@ -45,15 +45,36 @@ Optional Lighter dependency install:
 ## Optional learning warm-start (user-consent only)
 Not included in bootstrap by design.
 
+Release seed URL:
+- `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v1-20260216`
+
 Import command:
 ```bash
+curl -L -o /tmp/evclaw-learning-seed.tgz \
+  https://github.com/Degenapetrader/EVClaw/releases/download/evclaw-learning-seed-v1-20260216/evclaw-learning-seed.tgz
+curl -L -o /tmp/evclaw-learning-seed.tgz.sha256 \
+  https://github.com/Degenapetrader/EVClaw/releases/download/evclaw-learning-seed-v1-20260216/evclaw-learning-seed.tgz.sha256
+cd /tmp && sha256sum -c evclaw-learning-seed.tgz.sha256
+cd /path/to/evclaw
 python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz --apply
 ```
 
 Dry-run preview:
 ```bash
-python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz
+python3 scripts/import_learning_seed.py --seed /tmp/evclaw-learning-seed.tgz
 ```
+
+For OpenClaw agents:
+- Require user approval first.
+- Run dry-run command first.
+- Only run `--apply` after user confirms.
+
+Pros:
+- Better trading knowledge from real trade history.
+
+Cons:
+- Usually fewer trades than fresh-start profile.
+- If many users import the same seed, behavior can converge.
 
 ## Required EVPlus Endpoints
 EVClaw is network-first and expects EVPlus services by default:

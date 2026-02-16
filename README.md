@@ -69,12 +69,24 @@ cd /root/clawd/skills/hl-trader
 python3 scripts/export_learning_seed.py --out /tmp/evclaw-learning-seed.tgz
 ```
 
-User side (import into EVClaw):
+User side (import into EVClaw from release):
 
 ```bash
 cd /path/to/EVClaw
-python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz --apply
+curl -L -o /tmp/evclaw-learning-seed.tgz \
+  https://github.com/Degenapetrader/EVClaw/releases/download/evclaw-learning-seed-v1-20260216/evclaw-learning-seed.tgz
+curl -L -o /tmp/evclaw-learning-seed.tgz.sha256 \
+  https://github.com/Degenapetrader/EVClaw/releases/download/evclaw-learning-seed-v1-20260216/evclaw-learning-seed.tgz.sha256
+cd /tmp && sha256sum -c evclaw-learning-seed.tgz.sha256
+cd /path/to/EVClaw
+python3 scripts/import_learning_seed.py --seed /tmp/evclaw-learning-seed.tgz
+python3 scripts/import_learning_seed.py --seed /tmp/evclaw-learning-seed.tgz --apply
 ```
+
+OpenClaw agent instruction:
+- Ask for explicit user consent before importing learning seed.
+- Run dry-run first.
+- Run `--apply` only after user confirms.
 
 Pros:
 - Better trading knowledge from real trade history.
