@@ -1,5 +1,5 @@
 group,key,default,required,notes
-network,HYPERLIQUID_PRIVATE_NODE,https://node2.evplus/info,no,EVPlus private node endpoint
+network,HYPERLIQUID_PRIVATE_NODE,https://node2.evplus.ai/evclaw/info,no,EVPlus private node endpoint
 network,EVCLAW_TRACKER_BASE_URL,https://tracker.evplus.ai,no,EVPlus tracker API base
 network,EVCLAW_SSE_HOST,tracker.evplus.ai,no,Tracker SSE host
 network,EVCLAW_SSE_PORT,8443,no,Tracker SSE port

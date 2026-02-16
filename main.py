@@ -56,10 +56,39 @@ def get_nested(config: Dict[str, Any], *keys: str, default: Any = None) -> Any:
 def _normalize_hl_base_url(raw: str) -> str:
     base = (raw or "").strip()
     if not base:
-        return "https://node2.evplus"
+        return "https://node2.evplus.ai/evclaw"
     if base.endswith("/info"):
         base = base[:-5]
     return base.rstrip("/")
+
+
+def _normalize_hl_public_base_url(raw: str) -> str:
+    base = (raw or "").strip()
+    if not base:
+        return "https://api.hyperliquid.xyz"
+    if base.endswith("/info"):
+        base = base[:-5]
+    return base.rstrip("/")
+
+
+def _private_node_wallet_key() -> str:
+    return os.getenv("HYPERLIQUID_ADDRESS", "").strip()
+
+
+def _hl_info_targets(base_url: str) -> List[Tuple[str, Optional[Dict[str, str]]]]:
+    key = _private_node_wallet_key()
+    primary_params: Optional[Dict[str, str]] = None
+    if key and "node2.evplus.ai" in base_url:
+        primary_params = {"key": key}
+
+    targets: List[Tuple[str, Optional[Dict[str, str]]]] = [
+        (f"{base_url}/info", primary_params),
+    ]
+
+    public_base = _normalize_hl_public_base_url(os.getenv("HYPERLIQUID_PUBLIC_URL", ""))
+    if public_base and public_base != base_url:
+        targets.append((f"{public_base}/info", None))
+    return targets
 
 
 def _resolve_hl_equity_address() -> Optional[str]:
@@ -69,16 +98,24 @@ def _resolve_hl_equity_address() -> Optional[str]:
 
 def _fetch_hl_equity_sync(address: str, base_url: str, log: logging.Logger) -> float:
     payload = {"type": "clearinghouseState", "user": address}
-    try:
-        resp = requests.post(f"{base_url}/info", json=payload, timeout=5)
-        resp.raise_for_status()
-        state = resp.json()
-    except Exception as exc:
-        log.warning(f"Starting equity auto-fetch failed: {exc}")
-        return 0.0
+    errors: List[str] = []
+    for info_url, params in _hl_info_targets(base_url):
+        try:
+            kwargs: Dict[str, Any] = {"json": payload, "timeout": 5}
+            if params:
+                kwargs["params"] = params
+            resp = requests.post(info_url, **kwargs)
+            resp.raise_for_status()
+            state = resp.json()
+            margin = state.get("marginSummary", {}) if isinstance(state, dict) else {}
+            return float(margin.get("accountValue", 0.0) or 0.0)
+        except Exception as exc:
+            errors.append(f"{info_url}: {exc}")
+            continue
 
-    margin = state.get("marginSummary", {}) if isinstance(state, dict) else {}
-    return float(margin.get("accountValue", 0.0) or 0.0)
+    if errors:
+        log.warning(f"Starting equity auto-fetch failed: {' | '.join(errors)}")
+    return 0.0
 
 
 def _resolve_starting_equity(config: Dict[str, Any], log: logging.Logger) -> float:

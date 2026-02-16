@@ -146,10 +146,38 @@ def allocate_plan_id(db_path: str, symbol: str, ttl_seconds: int) -> Dict[str, A
 def _normalize_hl_base_url(raw: str) -> str:
     base = (raw or "").strip()
     if not base:
+        return "https://node2.evplus.ai/evclaw"
+    if base.endswith("/info"):
+        base = base[:-5]
+    return base.rstrip("/")
+
+
+def _normalize_hl_public_base_url(raw: str) -> str:
+    base = (raw or "").strip()
+    if not base:
         return "https://api.hyperliquid.xyz"
     if base.endswith("/info"):
         base = base[:-5]
     return base.rstrip("/")
+
+
+def _private_node_wallet_key() -> str:
+    return os.getenv("HYPERLIQUID_ADDRESS", "").strip()
+
+
+def _hl_info_targets(base_url: str) -> List[Tuple[str, Optional[Dict[str, str]]]]:
+    key = _private_node_wallet_key()
+    primary_params: Optional[Dict[str, str]] = None
+    if key and "node2.evplus.ai" in base_url:
+        primary_params = {"key": key}
+
+    targets: List[Tuple[str, Optional[Dict[str, str]]]] = [
+        (f"{base_url}/info", primary_params),
+    ]
+    public_base = _normalize_hl_public_base_url(os.getenv("HYPERLIQUID_PUBLIC_URL", ""))
+    if public_base and public_base != base_url:
+        targets.append((f"{public_base}/info", None))
+    return targets
 
 
 def _resolve_hl_equity_address() -> Optional[str]:
@@ -169,23 +197,28 @@ async def _fetch_live_hl_equity() -> Optional[Dict[str, Any]]:
     base_url = _normalize_hl_base_url(os.getenv("HYPERLIQUID_PRIVATE_NODE", ""))
 
     def _do() -> Optional[Dict[str, Any]]:
-        try:
-            import requests  # type: ignore
+        import requests  # type: ignore
 
-            payload = {"type": "clearinghouseState", "user": address}
-            resp = requests.post(f"{base_url}/info", json=payload, timeout=5)
-            resp.raise_for_status()
-            state = resp.json() if hasattr(resp, "json") else None
-            if not isinstance(state, dict):
-                return None
-            margin = state.get("marginSummary") if isinstance(state.get("marginSummary"), dict) else {}
-            eq = float(margin.get("accountValue", 0.0) or 0.0)
-            if eq <= 0:
-                return None
-            ts = _now()
-            return {"equity": eq, "address": address, "base_url": base_url, "ts": ts, "ts_iso": _iso(ts)}
-        except Exception:
-            return None
+        payload = {"type": "clearinghouseState", "user": address}
+        for info_url, params in _hl_info_targets(base_url):
+            try:
+                kwargs: Dict[str, Any] = {"json": payload, "timeout": 5}
+                if params:
+                    kwargs["params"] = params
+                resp = requests.post(info_url, **kwargs)
+                resp.raise_for_status()
+                state = resp.json() if hasattr(resp, "json") else None
+                if not isinstance(state, dict):
+                    continue
+                margin = state.get("marginSummary") if isinstance(state.get("marginSummary"), dict) else {}
+                eq = float(margin.get("accountValue", 0.0) or 0.0)
+                if eq <= 0:
+                    continue
+                ts = _now()
+                return {"equity": eq, "address": address, "base_url": info_url, "ts": ts, "ts_iso": _iso(ts)}
+            except Exception:
+                continue
+        return None
 
     try:
         return await asyncio.to_thread(_do)

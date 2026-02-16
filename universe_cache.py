@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import aiohttp
 import yaml
@@ -21,7 +22,23 @@ from env_utils import EVCLAW_SIGNALS_DIR, env_str
 
 from signal_utils import ensure_dir, load_json, write_json_atomic
 
-LOCAL_NODE_URL = env_str("HYPERLIQUID_PRIVATE_NODE", "https://node2.evplus/info")
+def _append_private_key_if_needed(url: str) -> str:
+    key = str(env_str("HYPERLIQUID_ADDRESS", "") or "").strip()
+    if not key:
+        return url
+    if "node2.evplus.ai" not in url or "/evclaw/info" not in url:
+        return url
+    parsed = urlsplit(url)
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if params.get("key"):
+        return url
+    params["key"] = key
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(params), parsed.fragment))
+
+
+LOCAL_NODE_URL = _append_private_key_if_needed(
+    env_str("HYPERLIQUID_PRIVATE_NODE", "https://node2.evplus.ai/evclaw/info")
+)
 _hl_public_base = env_str("HYPERLIQUID_PUBLIC_URL", "https://api.hyperliquid.xyz")
 HL_PUBLIC_API_URL = _hl_public_base.rstrip("/")
 if not HL_PUBLIC_API_URL.endswith("/info"):

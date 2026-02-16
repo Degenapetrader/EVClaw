@@ -30,10 +30,38 @@ HEARTBEAT_FILE = Path("/tmp/evclaw_fill_reconciler_heartbeat.json")
 def normalize_hl_base_url(raw: str) -> str:
     base = (raw or "").strip()
     if not base:
-        return "https://node2.evplus"
+        return "https://node2.evplus.ai/evclaw"
     if base.endswith("/info"):
         base = base[:-5]
     return base.rstrip("/")
+
+
+def normalize_hl_public_base_url(raw: str) -> str:
+    base = (raw or "").strip()
+    if not base:
+        return "https://api.hyperliquid.xyz"
+    if base.endswith("/info"):
+        base = base[:-5]
+    return base.rstrip("/")
+
+
+def _private_node_wallet_key() -> str:
+    return os.getenv("HYPERLIQUID_ADDRESS", "").strip()
+
+
+def _hl_info_targets(base_url: str) -> List[Tuple[str, Optional[Dict[str, str]]]]:
+    key = _private_node_wallet_key()
+    primary_params: Optional[Dict[str, str]] = None
+    if key and "node2.evplus.ai" in base_url:
+        primary_params = {"key": key}
+
+    targets: List[Tuple[str, Optional[Dict[str, str]]]] = [
+        (f"{base_url}/info", primary_params),
+    ]
+    public_base = normalize_hl_public_base_url(os.getenv("HYPERLIQUID_PUBLIC_URL", ""))
+    if public_base and public_base != base_url:
+        targets.append((f"{public_base}/info", None))
+    return targets
 
 
 def resolve_hl_equity_address() -> Optional[str]:
@@ -83,15 +111,27 @@ async def fetch_hl_state_http(
     payload = {"type": "clearinghouseState", "user": address}
 
     def _do_request() -> Optional[Dict[str, Any]]:
-        resp = request_post(f"{base_url}/info", json=payload, timeout=5)
-        resp.raise_for_status()
-        state = resp.json()
-        return state if isinstance(state, dict) else None
+        errors: List[str] = []
+        for info_url, params in _hl_info_targets(base_url):
+            try:
+                kwargs: Dict[str, Any] = {"json": payload, "timeout": 5}
+                if params:
+                    kwargs["params"] = params
+                resp = request_post(info_url, **kwargs)
+                resp.raise_for_status()
+                state = resp.json()
+                return state if isinstance(state, dict) else None
+            except Exception as exc:
+                errors.append(f"{info_url}: {exc}")
+                continue
+        if errors:
+            print(f"HL state fetch failed for {address}: {' | '.join(errors)}")
+        return None
 
     try:
         return await asyncio.to_thread(_do_request)
     except Exception as exc:
-        print(f"HL state fetch failed for {address} via {base_url}/info: {exc}")
+        print(f"HL state fetch failed for {address}: {exc}")
         return None
 
 

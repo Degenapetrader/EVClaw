@@ -1,7 +1,7 @@
 key,default,required,purpose
 HYPERLIQUID_ADDRESS,,yes,Trading wallet address
 HYPERLIQUID_AGENT_PRIVATE_KEY,,yes,Delegated agent signer key for HYPERLIQUID_ADDRESS not main wallet private key
-HYPERLIQUID_PRIVATE_NODE,https://node2.evplus/info,no,Private node info endpoint
+HYPERLIQUID_PRIVATE_NODE,https://node2.evplus.ai/evclaw/info,no,Private node info endpoint
 HYPERLIQUID_PROXIES,,no,Optional comma-separated proxy list
 EVCLAW_DB_PATH,./ai_trader.db,no,SQLite DB location
 EVCLAW_RUNTIME_DIR,./state,no,Runtime artifacts directory

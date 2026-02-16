@@ -40,7 +40,7 @@ Control helper skill installation with:
 ## Required EVPlus Endpoints
 EVClaw is network-first and expects EVPlus services by default:
 - Tracker SSE/API: `tracker.evplus.ai` (port `8443`, endpoint `/sse/tracker`)
-- Private node: `https://node2.evplus/info`
+- Private node: `https://node2.evplus.ai/evclaw/info`
 
 ## Run Without tmux (Optional)
 You can run each service in its own terminal:
@@ -84,6 +84,6 @@ tmux capture-pane -pt evclaw-live-agent -S -80 | tail -n 40
   - Check `EVCLAW_SSE_HOST`, `EVCLAW_SSE_PORT`, `EVCLAW_SSE_ENDPOINT`.
   - Verify `curl -ks https://tracker.evplus.ai/health`.
 - Node endpoint issues:
-  - Check `HYPERLIQUID_PRIVATE_NODE` (default `https://node2.evplus/info`).
+  - Check `HYPERLIQUID_PRIVATE_NODE` (default `https://node2.evplus.ai/evclaw/info`).
 - Proxy/network issues:
   - If needed, set `HYPERLIQUID_PROXIES`.

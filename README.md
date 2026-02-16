@@ -67,7 +67,7 @@ At minimum set:
 
 Common network defaults:
 - tracker SSE host: `tracker.evplus.ai:8443`
-- HL private node/info endpoint: `node2.evplus.ai` (as configured in `.env`)
+- HL private node/info endpoint: `https://node2.evplus.ai/evclaw/info` (as configured in `.env`)
 
 ## Trading modes (important)
 

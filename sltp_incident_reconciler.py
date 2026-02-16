@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import urllib.parse
 import urllib.request
 
 from env_utils import EVCLAW_DB_PATH, env_str
@@ -33,25 +34,66 @@ from env_utils import EVCLAW_DB_PATH, env_str
 def _normalize_info_url(raw: Optional[str]) -> str:
     base = (str(raw or "").strip()).rstrip("/")
     if not base:
-        return "https://node2.evplus/info"
+        return "https://node2.evplus.ai/evclaw/info"
     if base.endswith("/info"):
         return base
     return f"{base}/info"
 
 
-HL_INFO_URL = _normalize_info_url(env_str("HYPERLIQUID_PRIVATE_NODE", "https://node2.evplus/info"))
+def _normalize_public_info_url(raw: Optional[str]) -> str:
+    base = (str(raw or "").strip()).rstrip("/")
+    if not base:
+        return "https://api.hyperliquid.xyz/info"
+    if base.endswith("/info"):
+        return base
+    return f"{base}/info"
+
+
+def _append_private_key_if_needed(info_url: str) -> str:
+    key = (os.getenv("HYPERLIQUID_ADDRESS", "") or "").strip()
+    if not key:
+        return info_url
+    if "node2.evplus.ai" not in info_url or "/evclaw/info" not in info_url:
+        return info_url
+    parsed = urllib.parse.urlsplit(info_url)
+    params = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
+    if params.get("key"):
+        return info_url
+    params["key"] = key
+    query = urllib.parse.urlencode(params)
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
+
+
+HL_INFO_URL = _append_private_key_if_needed(
+    _normalize_info_url(env_str("HYPERLIQUID_PRIVATE_NODE", "https://node2.evplus.ai/evclaw/info"))
+)
+HL_PUBLIC_INFO_URL = _normalize_public_info_url(env_str("HYPERLIQUID_PUBLIC_URL", "https://api.hyperliquid.xyz/info"))
 DB_PATH_DEFAULT = str(Path(EVCLAW_DB_PATH).expanduser())
 DEFAULT_WALLET = (os.getenv("HYPERLIQUID_ADDRESS", "") or "").strip()
 
 
 def _hl_post(payload: Dict[str, Any], *, info_url: str, timeout: float = 10.0) -> Any:
-    req = urllib.request.Request(
-        info_url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+    urls = [info_url]
+    if HL_PUBLIC_INFO_URL and HL_PUBLIC_INFO_URL != info_url:
+        urls.append(HL_PUBLIC_INFO_URL)
+
+    last_exc: Optional[Exception] = None
+    for url in urls:
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    if last_exc is not None:
+        raise last_exc
+    return {}
 
 
 def _hl_frontend_open_orders(user: str, *, info_url: str) -> List[Dict[str, Any]]:
@@ -178,6 +220,7 @@ def main() -> int:
         print("ERROR: missing wallet; set HYPERLIQUID_ADDRESS or pass --wallet", file=sys.stderr)
         return 2
     info_url = _normalize_info_url(args.info_url)
+    info_url = _append_private_key_if_needed(info_url)
     accounts: List[str] = [wallet]
 
     # Live orders

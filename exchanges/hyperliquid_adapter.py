@@ -62,6 +62,7 @@ PRIVATE_INFO_TYPES = frozenset(
     {
         "meta",
         "spotmeta",
+        "spotclearinghousestate",
         "clearinghousestate",
         "openorders",
         "frontendopenorders",
@@ -170,6 +171,7 @@ class HyperliquidAdapter(ExchangeAdapter):
         # - private node can be used only for a small read-only /info subset.
         self._base_url: str = "https://api.hyperliquid.xyz"
         self._private_info_base_url: Optional[str] = None
+        self._private_info_key: Optional[str] = None
 
         # Proxy rotation for public API rate limits
         self._proxies: List[str] = []
@@ -579,10 +581,11 @@ class HyperliquidAdapter(ExchangeAdapter):
         address = os.getenv("HYPERLIQUID_ADDRESS", "").strip()
         agent_signer_key = os.getenv("HYPERLIQUID_AGENT_PRIVATE_KEY", "").strip()
         legacy_private_key = os.getenv("HYPERLIQUID_API", "").strip()
-        private_node = os.getenv("HYPERLIQUID_PRIVATE_NODE", "https://node2.evplus/info").strip()
+        private_node = os.getenv("HYPERLIQUID_PRIVATE_NODE", "https://node2.evplus.ai/evclaw/info").strip()
         self._private_info_base_url = (
             self._normalize_base_url(private_node) if private_node else None
         )
+        self._private_info_key = address or None
 
         # Load proxies for public API rate limit rotation
         proxy_str = os.getenv("HYPERLIQUID_PROXIES", "").strip()
@@ -657,8 +660,25 @@ class HyperliquidAdapter(ExchangeAdapter):
                 for attempt in range(MAX_PUBLIC_RETRIES):
                     proxy = self._next_proxy() if use_proxies else None
                     proxies = {"http": proxy, "https": proxy} if proxy else None
+                    params = None
                     try:
-                        r = requests.post(f"{base}/info", json=payload, timeout=5, proxies=proxies)
+                        normalized = self._normalize_base_url(base)
+                        if (
+                            self._private_info_base_url
+                            and normalized == self._private_info_base_url
+                            and self._private_info_key
+                        ):
+                            params = {"key": self._private_info_key}
+                    except Exception:
+                        params = None
+                    try:
+                        r = requests.post(
+                            f"{base}/info",
+                            json=payload,
+                            timeout=5,
+                            proxies=proxies,
+                            params=params,
+                        )
                     except Exception as exc:
                         self.log.warning(
                             f"Could not pre-fetch {payload.get('type')} from {base}: {exc}"
@@ -922,8 +942,14 @@ class HyperliquidAdapter(ExchangeAdapter):
         req_type = str((payload or {}).get("type") or "").strip()
         if self._private_info_base_url and self._can_use_private_info(payload):
             private_url = f"{self._private_info_base_url}/info"
+            params = {"key": self._private_info_key} if self._private_info_key else None
             try:
-                async with self._session.post(private_url, json=payload, proxy=None) as resp:
+                async with self._session.post(
+                    private_url,
+                    json=payload,
+                    proxy=None,
+                    params=params,
+                ) as resp:
                     if resp.status == 200:
                         return await resp.json()
                     text = await resp.text()

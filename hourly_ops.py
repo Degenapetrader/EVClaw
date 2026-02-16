@@ -28,6 +28,7 @@ import shutil
 import sqlite3
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -40,7 +41,8 @@ from exchanges.hyperliquid_adapter import HyperliquidAdapter
 ROOT_DIR = Path(__file__).resolve().parent
 REPO_NAME = "evclaw"
 DEFAULT_DB_PATH = ROOT_DIR / "ai_trader.db"
-DEFAULT_INFO_URL = "https://node2.evplus/info"
+DEFAULT_INFO_URL = "https://node2.evplus.ai/evclaw/info"
+DEFAULT_PUBLIC_INFO_URL = "https://api.hyperliquid.xyz/info"
 DEFAULT_JSON_OUT = ROOT_DIR / "state" / "hourly_ops_report.json"
 DEFAULT_SUMMARY_OUT = ROOT_DIR / "state" / "hourly_ops_summary.txt"
 DEFAULT_CYCLE_LATEST = Path("/tmp/evclaw_cycle_latest.json")
@@ -89,6 +91,24 @@ def _normalize_info_url(raw: str) -> str:
     return f"{base}/info"
 
 
+def _append_private_key_if_needed(info_url: str, wallet_key: str) -> str:
+    key = (wallet_key or "").strip()
+    if not key:
+        return info_url
+    if "node2.evplus.ai" not in info_url:
+        return info_url
+    if "/evclaw/info" not in info_url:
+        return info_url
+
+    parsed = urllib.parse.urlsplit(info_url)
+    params = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
+    if params.get("key"):
+        return info_url
+    params["key"] = key
+    query = urllib.parse.urlencode(params)
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
+
+
 def _load_dotenv(path: Path) -> Dict[str, str]:
     data: Dict[str, str] = {}
     if not path.exists():
@@ -127,18 +147,38 @@ def _tmux_exists(session: str) -> bool:
     return cp.returncode == 0
 
 
-def _post_info(info_url: str, payload: Dict[str, Any], timeout: float = 8.0) -> Any:
-    req = urllib.request.Request(
-        info_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8")
-    if not raw:
-        return {}
-    return json.loads(raw)
+def _post_info(
+    info_url: str,
+    payload: Dict[str, Any],
+    timeout: float = 8.0,
+    *,
+    fallback_info_url: str = DEFAULT_PUBLIC_INFO_URL,
+) -> Any:
+    urls: List[str] = [info_url]
+    if fallback_info_url and fallback_info_url != info_url:
+        urls.append(fallback_info_url)
+
+    last_exc: Optional[Exception] = None
+    for target_url in urls:
+        try:
+            req = urllib.request.Request(
+                target_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+            if not raw:
+                return {}
+            return json.loads(raw)
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    if last_exc is not None:
+        raise last_exc
+    return {}
 
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -162,13 +202,31 @@ def _current_disk_usage_pct(path: Path) -> float:
     return float(usage.used) * 100.0 / float(usage.total)
 
 
-def _fetch_open_orders(info_url: str, user: str) -> List[Dict[str, Any]]:
-    out = _post_info(info_url, {"type": "openOrders", "user": user})
+def _fetch_open_orders(
+    info_url: str,
+    user: str,
+    *,
+    fallback_info_url: str = DEFAULT_PUBLIC_INFO_URL,
+) -> List[Dict[str, Any]]:
+    out = _post_info(
+        info_url,
+        {"type": "openOrders", "user": user},
+        fallback_info_url=fallback_info_url,
+    )
     return out if isinstance(out, list) else []
 
 
-def _fetch_clearinghouse_state(info_url: str, user: str) -> Dict[str, Any]:
-    out = _post_info(info_url, {"type": "clearinghouseState", "user": user})
+def _fetch_clearinghouse_state(
+    info_url: str,
+    user: str,
+    *,
+    fallback_info_url: str = DEFAULT_PUBLIC_INFO_URL,
+) -> Dict[str, Any]:
+    out = _post_info(
+        info_url,
+        {"type": "clearinghouseState", "user": user},
+        fallback_info_url=fallback_info_url,
+    )
     return out if isinstance(out, dict) else {}
 
 
@@ -395,6 +453,7 @@ def _known_order_ids(conn: sqlite3.Connection) -> Set[str]:
 async def _cancel_unmatched_live_entries(
     conn: sqlite3.Connection,
     info_url: str,
+    fallback_info_url: str,
     accounts: List[AccountCtx],
     adapters: Dict[str, HyperliquidAdapter],
     *,
@@ -415,7 +474,11 @@ async def _cancel_unmatched_live_entries(
 
     for acct in accounts:
         try:
-            orders = _fetch_open_orders(info_url, acct.user)
+            orders = _fetch_open_orders(
+                info_url,
+                acct.user,
+                fallback_info_url=fallback_info_url,
+            )
         except Exception as exc:
             report["warnings"].append(f"open_orders_fetch_failed:{acct.label}:{exc}")
             orders = []
@@ -423,7 +486,11 @@ async def _cancel_unmatched_live_entries(
         metrics["live_open_total"] += len(orders)
 
         try:
-            states_by_account[acct.label] = _fetch_clearinghouse_state(info_url, acct.user)
+            states_by_account[acct.label] = _fetch_clearinghouse_state(
+                info_url,
+                acct.user,
+                fallback_info_url=fallback_info_url,
+            )
         except Exception:
             states_by_account[acct.label] = {}
 
@@ -842,7 +909,10 @@ def _write_outputs(report: Dict[str, Any], *, json_out: Path, summary_out: Path)
 
 async def _run_hourly(args: argparse.Namespace) -> int:
     dotenv = _load_dotenv(DOTENV_PATH)
-    info_url = _normalize_info_url(args.info_url or _env("HYPERLIQUID_PRIVATE_NODE", dotenv, DEFAULT_INFO_URL))
+    raw_private = args.info_url or _env("HYPERLIQUID_PRIVATE_NODE", dotenv, DEFAULT_INFO_URL)
+    wallet_key = _env("HYPERLIQUID_ADDRESS", dotenv)
+    info_url = _append_private_key_if_needed(_normalize_info_url(raw_private), wallet_key)
+    public_info_url = _normalize_info_url(_env("HYPERLIQUID_PUBLIC_URL", dotenv, DEFAULT_PUBLIC_INFO_URL))
     db_path = Path(args.db).expanduser()
 
     report: Dict[str, Any] = {
@@ -853,6 +923,7 @@ async def _run_hourly(args: argparse.Namespace) -> int:
             "cancel_unmatched_live_entries": bool(args.cancel_unmatched_live_entries),
             "db_path": str(db_path),
             "info_url": info_url,
+            "fallback_info_url": public_info_url,
         },
         "checks": {},
         "actions": [],
@@ -938,6 +1009,7 @@ async def _run_hourly(args: argparse.Namespace) -> int:
             unmatched, open_orders_by_account, states_by_account = await _cancel_unmatched_live_entries(
                 conn,
                 info_url,
+                public_info_url,
                 accounts,
                 adapters,
                 apply_fixes=bool(args.apply_fixes),

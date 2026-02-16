@@ -10,7 +10,7 @@
 ## Evidence-based context (existing code)
 
 ### Local node + tracker outputs
-- The tracker uses the private HL node at `https://node2.evplus/info` as its primary API and publishes per-symbol SSE snapshots at `/sse/tracker` (symbol_watcher.py:92-97).
+- The tracker uses the private HL node at `https://node2.evplus.ai/evclaw/info` as its primary API and publishes per-symbol SSE snapshots at `/sse/tracker` (symbol_watcher.py:92-97).
 - Market data is sourced from `metaAndAssetCtxs` and stored as funding, day volume, and prices (symbol_watcher.py:875-899).
 - Per-symbol JSON includes funding, 24h volume, and ATR (atr/atr_pct) fields that can be reused by new workers (symbol_watcher.py:2751-2805).
 - Existing ATR calculator already uses Binance Futures klines as primary with HL fallback (atr_calculator.py:92-108, 158-229).
