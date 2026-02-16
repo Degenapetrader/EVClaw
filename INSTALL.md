@@ -24,8 +24,9 @@ cp .env.example .env
 ./start.sh
 ```
 
-By default, `bootstrap.sh` also provisions one OpenClaw cron job for ops coverage:
-- `EVClaw AGI Trader Hourly (deterministic)`
+By default, `bootstrap.sh` also provisions two OpenClaw cron jobs for ops coverage:
+- `EVClaw AGI Trader Hourly (deterministic)` (every 15 minutes)
+- `EVClaw AGI Trader Hourly Report (system-event)` (every 1 hour)
 
 Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` if you want to skip cron installation.
 

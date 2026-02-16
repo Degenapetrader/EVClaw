@@ -172,8 +172,8 @@ After bootstrap, these user-facing helper skills are available:
 
 ## Operations and health
 
-- Deterministic ops job runs on schedule for reconciliation/maintenance.
-- OpenClaw cron job posts hourly status summary to main chat.
+- Deterministic ops cron runs every 15 minutes for reconciliation/maintenance.
+- OpenClaw hourly report cron posts a status summary to main chat.
 - Health/ops output is written to local runtime files and logs.
 
 ## Troubleshooting
