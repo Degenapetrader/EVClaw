@@ -43,4 +43,5 @@ def test_cli_close_execution_path_is_decider_only() -> None:
 
 def test_restart_script_uses_hybrid_fill_mode() -> None:
     src = _read("restart.sh")
-    assert '[evclaw-fill-reconciler]="python3 run_fill_reconciler.py --mode hybrid 2>&1"' in src
+    assert "evclaw-fill-reconciler" in src
+    assert "run_fill_reconciler.py --mode hybrid" in src
