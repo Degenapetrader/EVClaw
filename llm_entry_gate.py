@@ -73,8 +73,10 @@ def _truthy(name: str, default: bool = False) -> bool:
 
 def _normalize_agent_id(value: Optional[str]) -> Optional[str]:
     raw = str(value or "").strip()
-    if not raw or raw.lower() in {"default", "openclaw-default"}:
+    if not raw:
         return None
+    if raw.lower() in {"default", "openclaw-default"}:
+        return "default"
     return raw
 
 
