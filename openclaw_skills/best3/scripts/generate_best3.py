@@ -310,22 +310,21 @@ def main() -> int:
 
         resting = _maker_safe_limit_price(direction=direction, suggested=float(resting), best_bid=best_bid, best_ask=best_ask)
 
-        # size
+        # size: use same risk-based sizing source as /trade first, then fallback.
         rec_size = None
         try:
-            sizing = ((c.get("context_snapshot") or {}).get("sizing") or {}) if isinstance((c.get("context_snapshot") or {}).get("sizing"), dict) else {}
-            rec_size = sizing.get("recommended_size_usd")
+            ctx = build_context(args.db, args.runtime, sym)
+            rec_size = ((ctx.get("sizing") or {}) if isinstance(ctx.get("sizing"), dict) else {}).get("recommended_size_usd")
         except Exception:
             rec_size = None
         if rec_size is None:
-            # build_context has sizing too; use that as fallback
             try:
-                ctx = build_context(args.db, args.runtime, sym)
-                rec_size = ((ctx.get("sizing") or {}) if isinstance(ctx.get("sizing"), dict) else {}).get("recommended_size_usd")
+                sizing = ((c.get("context_snapshot") or {}).get("sizing") or {}) if isinstance((c.get("context_snapshot") or {}).get("sizing"), dict) else {}
+                rec_size = sizing.get("recommended_size_usd")
             except Exception:
                 rec_size = None
 
-        default_size = float(os.getenv("EVCLAW_MANUAL_TRADE_DEFAULT_SIZE_USD", "5000") or 5000)
+        default_size = float(os.getenv("EVCLAW_MANUAL_TRADE_DEFAULT_SIZE_USD", "100") or 100)
         try:
             size_usd = float(rec_size) if rec_size is not None else default_size
         except Exception:

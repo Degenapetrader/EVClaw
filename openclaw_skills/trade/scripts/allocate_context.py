@@ -520,11 +520,11 @@ def build_context(db_path: str, runtime_dir: str, symbol: str) -> Dict[str, Any]
         live_prices = None
         live_equity = None
 
-    # Sizing hint: compute a risk-based default size so the user doesn't get a random $1k.
+    # Sizing hint: compute a risk-based default size.
     try:
-        risk_pct = float(os.getenv("EVCLAW_MANUAL_TRADE_RISK_PCT", "0.5") or 0.5)
+        risk_pct = float(os.getenv("EVCLAW_MANUAL_TRADE_RISK_PCT", "1.0") or 1.0)
     except Exception:
-        risk_pct = 0.5
+        risk_pct = 1.0
     risk_pct = max(0.05, min(2.5, risk_pct))
 
     default_sl_pct = 1.5 if sym in {"BTC", "ETH"} else 2.0
