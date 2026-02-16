@@ -32,6 +32,7 @@ Rules:
 - `tmux`
 - `git`
 - OpenClaw installed and configured with a working LLM provider
+- Lighter SDK is optional (only needed if you enable Lighter venue)
 
 ## Quick start
 
@@ -68,6 +69,7 @@ At minimum set:
 Common network defaults:
 - tracker SSE host: `tracker.evplus.ai:8443`
 - HL private node/info endpoint: `https://node2.evplus.ai/evclaw/info` (as configured in `.env`)
+- Before first run, approve builder fee for your wallet: `https://atsetup.evplus.ai/`
 
 ## Trading modes (important)
 
@@ -131,6 +133,7 @@ After bootstrap, these user-facing helper skills are available:
 
 - If no trades appear, verify OpenClaw agent IDs and provider config.
 - If SSE fails, verify tracker endpoint/key in `.env`.
+- If SSE/node2 returns 401/403, approve builder fee for your wallet at `https://atsetup.evplus.ai/`.
 - If HL auth fails, verify `HYPERLIQUID_ADDRESS` and `HYPERLIQUID_AGENT_PRIVATE_KEY`.
 - If `HYPERLIQUID_API` appears in your `.env`, remove it and use `HYPERLIQUID_AGENT_PRIVATE_KEY`.
 - If processes are missing, run `./start.sh` again and inspect tmux sessions.

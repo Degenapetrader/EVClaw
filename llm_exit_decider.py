@@ -73,7 +73,7 @@ EXIT_DECIDER_STATE_PATH = Path(EVCLAW_MEMORY_DIR) / "exit_decider_state.json"
 EXIT_DECIDER_LOCK_PATH = Path(EVCLAW_MEMORY_DIR) / "exit_decider.lock"
 EXIT_DECIDER_DECISIONS_JSONL = str(Path(EVCLAW_DOCS_DIR) / "llm_decisions.jsonl")
 EXIT_DECIDER_DIARY_PATH = str(Path(EVCLAW_DOCS_DIR) / "openclawdiary.md")
-EXIT_DECIDER_MODEL_DEFAULT = "openai-codex/gpt-5.2"
+EXIT_DECIDER_MODEL_DEFAULT: Optional[str] = None
 EXIT_DECIDER_THINKING_DEFAULT = "medium"
 EXIT_DYNAMIC_BACKLOG_TWO = 10
 EXIT_DYNAMIC_BACKLOG_THREE = 25
@@ -738,11 +738,13 @@ def _load_runtime_config(
         if thinking_raw in {"off", "minimal", "low", "medium", "high"}
         else EXIT_DECIDER_THINKING_DEFAULT
     )
-    model = str(
-        runtime_overrides.get("model")
-        or _shared_env_str("EVCLAW_EXIT_DECIDER_MODEL")
-        or EXIT_DECIDER_MODEL_DEFAULT
-    ).strip() or EXIT_DECIDER_MODEL_DEFAULT
+    model_raw = runtime_overrides.get("model")
+    if model_raw is None:
+        model_raw = _shared_env_str("EVCLAW_EXIT_DECIDER_MODEL")
+    model_txt = str(model_raw or "").strip()
+    if model_txt.lower() in {"default", "openclaw-default"}:
+        model_txt = ""
+    model: Optional[str] = model_txt or EXIT_DECIDER_MODEL_DEFAULT
     timeout_sec = EXIT_DECIDER_TIMEOUT_SEC
     close_timeout_sec = max(1.0, EXIT_DECIDER_CLOSE_TIMEOUT_SEC)
     poll_sec = _env_float("EVCLAW_EXIT_DECIDER_POLL_SEC", float(exit_cfg.get("poll_sec") or 10.0))

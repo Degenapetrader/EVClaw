@@ -34,10 +34,10 @@ def _hip3_runtime_overrides() -> dict:
         or (env_str("EVCLAW_EXIT_DECIDER_AGENT_ID", "") or "").strip()
         or "default"
     )
-    hip3_model = (
-        env_str("EVCLAW_HIP3_EXIT_DECIDER_MODEL", "")
-        or "openai-codex/gpt-5.2"
-    ).strip() or "openai-codex/gpt-5.2"
+    hip3_model_raw = (env_str("EVCLAW_HIP3_EXIT_DECIDER_MODEL", "") or "").strip()
+    if hip3_model_raw.lower() in {"default", "openclaw-default"}:
+        hip3_model_raw = ""
+    hip3_model = hip3_model_raw or None
     hip3_thinking = (
         env_str("EVCLAW_HIP3_EXIT_DECIDER_THINKING", "")
         or "medium"

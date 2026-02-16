@@ -6,6 +6,7 @@
 - `tmux`
 - `git`
 - `openclaw` installed and configured with a model provider
+- Lighter SDK is optional (only if you enable Lighter venue)
 
 ## Quick Install
 ```bash
@@ -18,6 +19,7 @@ cp .env.example .env
 # HYPERLIQUID_ADDRESS = main wallet address
 # HYPERLIQUID_AGENT_PRIVATE_KEY = delegated agent signer key
 # Do not use your main wallet private key.
+# approve builder fee for your wallet: https://atsetup.evplus.ai/
 ./bootstrap.sh
 ./start.sh
 ```
@@ -34,6 +36,9 @@ Control helper skill installation with:
 - `EVCLAW_INSTALL_EXTRA_SKILLS=0` to skip
 - `EVCLAW_EXTRA_SKILLS=trade,execute,best3,stats,hedge` to customize
 - `EVCLAW_OPENCLAW_SKILLS_DIR=/your/path` to change target skills directory
+
+Optional Lighter dependency install:
+- `EVCLAW_INSTALL_LIGHTER_DEPS=1 ./bootstrap.sh`
 
 `bootstrap.sh` auto-sets `EVCLAW_ROOT` in `.env` to the current repo path so path-dependent defaults stay portable on any machine/location.
 
@@ -83,6 +88,7 @@ tmux capture-pane -pt evclaw-live-agent -S -80 | tail -n 40
 - Tracker unreachable:
   - Check `EVCLAW_SSE_HOST`, `EVCLAW_SSE_PORT`, `EVCLAW_SSE_ENDPOINT`.
   - Verify `curl -ks https://tracker.evplus.ai/health`.
+  - If tracker/node2 auth returns 401/403, approve builder fee at `https://atsetup.evplus.ai/`.
 - Node endpoint issues:
   - Check `HYPERLIQUID_PRIVATE_NODE` (default `https://node2.evplus.ai/evclaw/info`).
 - Proxy/network issues:

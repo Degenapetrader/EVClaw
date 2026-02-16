@@ -29,6 +29,16 @@ if ! command -v tmux >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v git >/dev/null 2>&1; then
+  echo "git is required" >&2
+  exit 1
+fi
+
+if ! python3 -m venv --help >/dev/null 2>&1; then
+  echo "python3 venv module is required (try: apt-get install -y python3-venv)" >&2
+  exit 1
+fi
+
 # Create venv if it does not exist.
 if [[ ! -d .venv ]]; then
   echo "Creating virtual environment..."
@@ -42,8 +52,17 @@ if [[ ! -x "$EVCLAW_PYTHON" ]]; then
 fi
 export EVCLAW_PYTHON
 
-echo "Installing dependencies (using $EVCLAW_PYTHON)..."
+echo "Installing core dependencies (using $EVCLAW_PYTHON)..."
 "$EVCLAW_PYTHON" -m pip install -r requirements.txt
+
+if [[ "${EVCLAW_INSTALL_LIGHTER_DEPS:-0}" == "1" || "${EVCLAW_INSTALL_LIGHTER_DEPS:-}" == "true" || "${EVCLAW_INSTALL_LIGHTER_DEPS:-}" == "yes" ]]; then
+  if [[ -f requirements-lighter.txt ]]; then
+    echo "Installing optional Lighter dependencies..."
+    "$EVCLAW_PYTHON" -m pip install -r requirements-lighter.txt
+  else
+    echo "Optional Lighter dependency file not found: requirements-lighter.txt" >&2
+  fi
+fi
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
@@ -81,6 +100,12 @@ warn_if_missing_runtime_env() {
     echo "Use HYPERLIQUID_AGENT_PRIVATE_KEY (delegated agent signer key for HYPERLIQUID_ADDRESS)." >&2
     echo "Do not use your main wallet private key here." >&2
   fi
+}
+
+remind_builder_approval() {
+  echo "Reminder: approve builder fee for your wallet before first run:"
+  echo "  https://atsetup.evplus.ai/"
+  echo "If not approved, tracker/node2 auth can reject with 401/403."
 }
 
 ensure_openclaw_cli() {
@@ -184,6 +209,7 @@ ensure_openclaw_cli
 ensure_openclaw_skill_link
 install_openclaw_helper_skills
 warn_if_missing_runtime_env
+remind_builder_approval
 
 mkdir -p state memory signals docs
 

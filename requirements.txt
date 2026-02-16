@@ -9,7 +9,6 @@ websockets>=12.0
 pyyaml>=6.0
 eth-account>=0.13.0
 hyperliquid-python-sdk>=0.21.0
-lighter-sdk @ git+https://github.com/elliottech/lighter-python.git@54d3582ff64571aa7230de1f682188d32fa38561
 
 # Testing (optional)
 pytest>=7.0.0

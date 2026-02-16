@@ -1,0 +1,5 @@
+# Optional Lighter venue dependency.
+# Install only if you explicitly enable/use Lighter:
+#   EVCLAW_INSTALL_LIGHTER_DEPS=1 ./bootstrap.sh
+
+lighter-sdk @ git+https://github.com/elliottech/lighter-python.git@54d3582ff64571aa7230de1f682188d32fa38561
