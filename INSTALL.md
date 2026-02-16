@@ -29,8 +29,6 @@ By default, `bootstrap.sh` also provisions two OpenClaw cron jobs for ops covera
 - `EVClaw AGI Trader Hourly Report (system-event)` (every 1 hour)
 
 Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` if you want to skip cron installation.
-Cron delivery target defaults to `EVCLAW_OPENCLAW_CRON_CHANNEL=main`.
-If your OpenClaw route is different, set `EVCLAW_OPENCLAW_CRON_TO` (or `EVCLAW_OPENCLAW_CRON_CHANNEL`) in `.env`.
 
 By default, `bootstrap.sh` also installs helper skills into OpenClaw:
 - `trade`, `execute`, `best3`, `hedge`, `stats`
