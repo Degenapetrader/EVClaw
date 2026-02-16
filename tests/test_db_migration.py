@@ -863,6 +863,29 @@ def test_update_symbol_policy_preserves_zero_values() -> None:
     assert int(row["samples"]) == 0
 
 
+def test_migrate_v36_repairs_missing_symbol_policy_table() -> None:
+    """Regression: DBs at v35 can still miss symbol_policy; v36 must repair it."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA user_version = 35")
+        conn.commit()
+
+    AITraderDB(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        table_exists = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_policy'"
+        ).fetchone()[0]
+        assert int(table_exists) == 1
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert int(version) >= 36
+    finally:
+        conn.close()
+
+
 def test_duplicate_open_trade_does_not_overwrite_entry_fields() -> None:
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
@@ -1084,6 +1107,8 @@ if __name__ == "__main__":
     print("[PASS] signal combo arithmetic consistency")
     test_update_symbol_policy_preserves_zero_values()
     print("[PASS] symbol policy preserves zero values")
+    test_migrate_v36_repairs_missing_symbol_policy_table()
+    print("[PASS] v36 symbol_policy table repair")
     test_duplicate_open_trade_does_not_overwrite_entry_fields()
     print("[PASS] duplicate open trade does not overwrite")
     test_nullable_trade_id_in_fills()

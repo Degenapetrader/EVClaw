@@ -222,6 +222,24 @@ class SymbolRRLearner:
         self._conn: Optional[sqlite3.Connection] = None
         self._conn_lock = threading.Lock()
 
+    def _ensure_symbol_policy_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS symbol_policy (
+                symbol TEXT PRIMARY KEY,
+                sl_mult_adjustment REAL DEFAULT 1.0,
+                tp_mult_adjustment REAL DEFAULT 1.0,
+                size_adjustment REAL DEFAULT 1.0,
+                stop_out_rate REAL DEFAULT 0.0,
+                win_rate REAL DEFAULT 0.5,
+                samples INTEGER DEFAULT 0,
+                last_updated REAL,
+                notes TEXT
+            )
+            """
+        )
+        conn.commit()
+
     def _get_connection(self) -> sqlite3.Connection:
         with self._conn_lock:
             conn = self._conn
@@ -239,6 +257,7 @@ class SymbolRRLearner:
             conn = sqlite3.connect(self.db_path, timeout=30.0, check_same_thread=False)
             conn.execute("PRAGMA busy_timeout=30000")
             conn.row_factory = sqlite3.Row
+            self._ensure_symbol_policy_table(conn)
             self._conn = conn
             return conn
 

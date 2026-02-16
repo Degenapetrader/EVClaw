@@ -69,6 +69,7 @@ Default target is `~/.openclaw/skills` (override with `EVCLAW_OPENCLAW_SKILLS_DI
 This is optional and intentionally NOT part of `bootstrap.sh`.
 Use it only when the user explicitly agrees.
 The seed includes learned `symbol_policy` rows (per-symbol SL/TP adjustments).
+Pattern-learning state is imported via `learning_state_kv` (`patterns`/`adjustments`), not a `pattern_stats` SQL table.
 
 Maintainer side (export from `hl-trader`):
 

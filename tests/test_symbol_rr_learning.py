@@ -2,6 +2,7 @@
 """Regression tests for symbol_rr_learning safety guards."""
 
 import sys
+import sqlite3
 import tempfile
 import time
 from pathlib import Path
@@ -76,3 +77,30 @@ def test_fetch_oi_data_keeps_stale_cache_and_sets_retry_on_refresh_failure(monke
     out = learner._fetch_oi_data()
     assert out == stale
     assert float(srl._oi_next_retry_ts) > now
+
+
+def test_get_policy_for_symbol_auto_repairs_missing_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    with sqlite3.connect(db_path) as conn:
+        exists_before = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_policy'"
+        ).fetchone()[0]
+        assert int(exists_before) == 0
+
+    learner = SymbolRRLearner(db_path)
+    monkeypatch.setattr(SymbolRRLearner, "_fetch_oi_data", lambda self: {})
+    try:
+        sl_mult, tp_mult, source = learner.get_policy_for_symbol("BTC")
+        assert float(sl_mult) > 0.0
+        assert float(tp_mult) > 0.0
+        assert source.startswith("category:")
+    finally:
+        learner.close()
+
+    with sqlite3.connect(db_path) as conn:
+        exists_after = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='symbol_policy'"
+        ).fetchone()[0]
+        assert int(exists_after) == 1

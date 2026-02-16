@@ -54,7 +54,6 @@ LEARNING_TABLES: List[str] = [
     "conviction_config_history",
     "dead_capital_stats",
     "signal_combos",
-    "pattern_stats",
     "trades",  # imported as CLOSED trades only
 ]
 

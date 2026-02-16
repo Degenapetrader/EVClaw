@@ -441,6 +441,7 @@ class AITraderDB:
             self._migrate_v33(conn)
             self._migrate_v34(conn)
             self._migrate_v35(conn)
+            self._migrate_v36(conn)
 
             # Create fills indexes (after migration so columns exist)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_fills_trade ON fills (trade_id)")
@@ -1854,6 +1855,31 @@ class AITraderDB:
             pass
 
         conn.execute("PRAGMA user_version = 35")
+        conn.commit()
+
+    def _migrate_v36(self, conn: sqlite3.Connection) -> None:
+        """Ensure symbol_policy table exists for all DB histories (v36)."""
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version >= 36:
+            return
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS symbol_policy (
+                symbol TEXT PRIMARY KEY,
+                sl_mult_adjustment REAL DEFAULT 1.0,
+                tp_mult_adjustment REAL DEFAULT 1.0,
+                size_adjustment REAL DEFAULT 1.0,
+                stop_out_rate REAL DEFAULT 0.0,
+                win_rate REAL DEFAULT 0.5,
+                samples INTEGER DEFAULT 0,
+                last_updated REAL,
+                notes TEXT
+            )
+            """
+        )
+
+        conn.execute("PRAGMA user_version = 36")
         conn.commit()
 
     # =========================================================================
