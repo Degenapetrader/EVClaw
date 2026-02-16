@@ -142,10 +142,19 @@ install_openclaw_helper_skills() {
   fi
 
   mkdir -p "$skills_dir"
+  skills_dir="$(cd "$skills_dir" && pwd)"
+  bundle_dir="$(cd "$bundle_dir" && pwd)"
   IFS=',' read -r -a requested <<< "$skills_csv"
   for raw in "${requested[@]}"; do
     local name="${raw//[[:space:]]/}"
     [[ -z "$name" ]] && continue
+
+    # Strict name allowlist to prevent path traversal and unsafe rm targets.
+    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+      echo "Unsafe helper skill name (skip): $name" >&2
+      continue
+    fi
+
     local src="$bundle_dir/$name"
     local dst="$skills_dir/$name"
 
@@ -154,10 +163,19 @@ install_openclaw_helper_skills() {
       continue
     fi
 
+    # Safety guard: never allow dst outside skills_dir.
+    case "$dst" in
+      "$skills_dir"/*) ;;
+      *)
+        echo "Refusing unsafe helper skill target path (skip): $dst" >&2
+        continue
+        ;;
+    esac
+
     if [[ -e "$dst" || -L "$dst" ]]; then
-      rm -rf "$dst"
+      rm -rf -- "$dst"
     fi
-    ln -s "$src" "$dst"
+    ln -s -- "$src" "$dst"
     echo "Installed OpenClaw helper skill: $dst -> $src"
   done
 }

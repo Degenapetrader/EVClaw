@@ -21,7 +21,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Union
 
 import aiohttp
 
-from env_utils import env_int, env_str
+from env_utils import env_bool, env_int, env_str
 
 # SSE Server Configuration
 SSE_HOST = env_str(
@@ -33,6 +33,7 @@ SSE_ENDPOINT = env_str(
     "EVCLAW_SSE_ENDPOINT",
     "/sse/tracker",
 )
+SSE_INSECURE_SSL = env_bool("EVCLAW_SSE_INSECURE_SSL", False)
 
 # Reconnection settings
 RECONNECT_MIN_DELAY = 2.0  # seconds (hard-coded)
@@ -120,6 +121,7 @@ class TrackerSSEClient:
 
         # Reconnection state
         self._reconnect_delay = RECONNECT_MIN_DELAY
+        self._logged_insecure_tls_warning = False
 
     @property
     def url(self) -> str:
@@ -185,10 +187,18 @@ class TrackerSSEClient:
 
     async def _connect_once(self) -> None:
         """Establish single SSE connection and process messages."""
-        # Create SSL context that accepts self-signed certificates
+        # Default: strict TLS verification.
+        # Optional dev override: EVCLAW_SSE_INSECURE_SSL=1.
         ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
+        if SSE_INSECURE_SSL:
+            if not self._logged_insecure_tls_warning:
+                self.log.warning(
+                    "EVCLAW_SSE_INSECURE_SSL=1 -> TLS cert verification is disabled for SSE. "
+                    "Use only for local/debug scenarios."
+                )
+                self._logged_insecure_tls_warning = True
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
 
         # Create session with custom SSL and large read buffer for SSE snapshots
         # SSE snapshots can be 2.6MB+ compressed, need larger chunk limit
