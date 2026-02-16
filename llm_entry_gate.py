@@ -369,10 +369,8 @@ class EntryGateConfig:
         if hip3_mode:
             enabled_default = True
             agent_id = _normalize_agent_id(
-                _compat_env_str(
-                    "EVCLAW_HIP3_LLM_GATE_AGENT_ID",
-                    _compat_env_str("EVCLAW_LLM_GATE_AGENT_ID", "default"),
-                )
+                (_compat_env_str("EVCLAW_HIP3_LLM_GATE_AGENT_ID", "evclaw-hip3-entry-gate") or "").strip()
+                or (_compat_env_str("EVCLAW_LLM_GATE_AGENT_ID", "evclaw-entry-gate") or "").strip()
             )
             model = (
                 _compat_env_str("EVCLAW_HIP3_LLM_GATE_MODEL", "openai-codex/gpt-5.2")
@@ -385,7 +383,7 @@ class EntryGateConfig:
         else:
             enabled_default = entry_gate_enabled_env(False, mode=mode_norm)
             agent_id = _normalize_agent_id(
-                _compat_env_str("EVCLAW_LLM_GATE_AGENT_ID", "default")
+                _compat_env_str("EVCLAW_LLM_GATE_AGENT_ID", "evclaw-entry-gate")
             )
             model = (
                 _compat_env_str(f"{env_prefix}MODEL", "openai-codex/gpt-5.2")

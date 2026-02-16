@@ -66,7 +66,7 @@ DEFAULT_DB = EVCLAW_DB_PATH
 LOG = logging.getLogger(__name__)
 _WAL_INITIALIZED_DB_PATHS: set[str] = set()
 
-EXIT_DECIDER_AGENT_ID = "default"
+EXIT_DECIDER_AGENT_ID = "evclaw-exit-decider"
 EXIT_DECIDER_TIMEOUT_SEC = 120.0
 EXIT_DECIDER_CLOSE_TIMEOUT_SEC = 120.0
 EXIT_DECIDER_STATE_PATH = Path(EVCLAW_MEMORY_DIR) / "exit_decider_state.json"

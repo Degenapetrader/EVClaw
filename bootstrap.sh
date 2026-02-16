@@ -81,6 +81,109 @@ export EVCLAW_ROOT="$DIR"
 # shellcheck disable=SC1091
 source .env
 
+ensure_evclaw_agent_env_defaults() {
+  local pairs=(
+    "EVCLAW_LLM_GATE_AGENT_ID=evclaw-entry-gate"
+    "EVCLAW_HIP3_LLM_GATE_AGENT_ID=evclaw-hip3-entry-gate"
+    "EVCLAW_EXIT_DECIDER_AGENT_ID=evclaw-exit-decider"
+    "EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID=evclaw-hip3-exit-decider"
+    "EVCLAW_LEARNING_REFLECTOR_AGENT_ID=evclaw-learning-reflector"
+  )
+  local changed=0
+  local key val cur
+
+  for kv in "${pairs[@]}"; do
+    key="${kv%%=*}"
+    val="${kv#*=}"
+    cur="${!key:-}"
+    if grep -q "^${key}=" .env; then
+      if [[ -z "$cur" || "$cur" == "default" || "$cur" == "openclaw-default" ]]; then
+        sed -i "s|^${key}=.*|${key}=${val}|" .env
+        export "${key}=${val}"
+        changed=1
+      fi
+    else
+      printf "%s=%s\n" "$key" "$val" >> .env
+      export "${key}=${val}"
+      changed=1
+    fi
+  done
+
+  if [[ "$changed" == "1" ]]; then
+    echo "Set EVClaw isolated agent IDs in .env."
+  fi
+}
+
+ensure_openclaw_isolated_agents() {
+  local enabled="${EVCLAW_INSTALL_ISOLATED_AGENTS:-1}"
+  if [[ "$enabled" != "1" && "${enabled,,}" != "true" && "${enabled,,}" != "yes" ]]; then
+    echo "Skipping isolated agent provisioning (EVCLAW_INSTALL_ISOLATED_AGENTS=$enabled)"
+    return 0
+  fi
+
+  local agents_json
+  if ! agents_json="$(openclaw agents list --json 2>/dev/null)"; then
+    echo "Warning: unable to list OpenClaw agents; skipping isolated agent provisioning." >&2
+    return 0
+  fi
+
+  local specs=(
+    "${EVCLAW_LLM_GATE_AGENT_ID:-evclaw-entry-gate}|${EVCLAW_LLM_GATE_MODEL:-}"
+    "${EVCLAW_HIP3_LLM_GATE_AGENT_ID:-evclaw-hip3-entry-gate}|${EVCLAW_HIP3_LLM_GATE_MODEL:-}"
+    "${EVCLAW_EXIT_DECIDER_AGENT_ID:-evclaw-exit-decider}|${EVCLAW_EXIT_DECIDER_MODEL:-}"
+    "${EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID:-evclaw-hip3-exit-decider}|${EVCLAW_HIP3_EXIT_DECIDER_MODEL:-}"
+    "${EVCLAW_LEARNING_REFLECTOR_AGENT_ID:-evclaw-learning-reflector}|"
+  )
+
+  local spec agent_id model workspace
+  for spec in "${specs[@]}"; do
+    agent_id="${spec%%|*}"
+    model="${spec#*|}"
+    agent_id="$(printf '%s' "$agent_id" | xargs)"
+    model="$(printf '%s' "$model" | xargs)"
+    [[ -z "$agent_id" ]] && continue
+
+    if printf '%s' "$agents_json" | python3 - "$agent_id" <<'PY'
+import json
+import sys
+
+target = str(sys.argv[1]).strip()
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(2)
+
+if isinstance(data, list):
+    for row in data:
+        if isinstance(row, dict) and str(row.get("id") or "").strip() == target:
+            raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+    then
+      echo "OpenClaw isolated agent exists: $agent_id"
+      continue
+    fi
+
+    workspace="$HOME/.openclaw/workspace-$agent_id"
+    if [[ -n "$model" ]]; then
+      if openclaw agents add "$agent_id" --workspace "$workspace" --non-interactive --model "$model" >/dev/null 2>&1; then
+        echo "Created OpenClaw isolated agent: $agent_id (model=$model)"
+      else
+        echo "Warning: failed to create OpenClaw agent $agent_id" >&2
+      fi
+    else
+      if openclaw agents add "$agent_id" --workspace "$workspace" --non-interactive >/dev/null 2>&1; then
+        echo "Created OpenClaw isolated agent: $agent_id"
+      else
+        echo "Warning: failed to create OpenClaw agent $agent_id" >&2
+      fi
+    fi
+
+    agents_json="$(openclaw agents list --json 2>/dev/null || printf '[]')"
+  done
+}
+
 warn_if_missing_runtime_env() {
   local missing=()
   if [[ -z "${HYPERLIQUID_ADDRESS:-}" ]]; then
@@ -206,6 +309,8 @@ install_openclaw_helper_skills() {
 }
 
 ensure_openclaw_cli
+ensure_evclaw_agent_env_defaults
+ensure_openclaw_isolated_agents
 ensure_openclaw_skill_link
 install_openclaw_helper_skills
 warn_if_missing_runtime_env

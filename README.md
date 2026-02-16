@@ -57,6 +57,13 @@ cp .env.example .env
 
 Default target is `~/.openclaw/skills` (override with `EVCLAW_OPENCLAW_SKILLS_DIR`).
 
+`bootstrap.sh` also sets/provisions isolated OpenClaw agent IDs (no `default` routing):
+- `evclaw-entry-gate`
+- `evclaw-hip3-entry-gate`
+- `evclaw-exit-decider`
+- `evclaw-hip3-exit-decider`
+- `evclaw-learning-reflector`
+
 ## Optional: import historical learning (opt-in)
 
 This is optional and intentionally NOT part of `bootstrap.sh`.
@@ -104,6 +111,7 @@ At minimum set:
 - `HYPERLIQUID_ADDRESS` is the main wallet address being traded.
 - `HYPERLIQUID_AGENT_PRIVATE_KEY` is the delegated agent signer key authorized for that wallet.
 - Do not use your main wallet private key.
+- Keep EVClaw agent IDs as dedicated IDs (defaults above), not `default`.
 
 Common network defaults:
 - tracker SSE host: `tracker.evplus.ai:8443`

@@ -51,8 +51,8 @@ def _normalize_agent_id(value: Optional[str]) -> Optional[str]:
 
 DEFAULT_AGENT_ID = (
     _normalize_agent_id(
-        _compat_env_str("EVCLAW_LEARNING_REFLECTOR_AGENT_ID", "default")
-        or "default"
+        _compat_env_str("EVCLAW_LEARNING_REFLECTOR_AGENT_ID", "evclaw-learning-reflector")
+        or "evclaw-learning-reflector"
     )
 )
 DEFAULT_THINKING = (

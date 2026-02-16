@@ -32,10 +32,18 @@ Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` if you want to skip cron installation.
 By default, `bootstrap.sh` also installs helper skills into OpenClaw:
 - `trade`, `execute`, `best3`, `hedge`, `stats`
 
+By default, `bootstrap.sh` also sets/provisions isolated OpenClaw agent IDs:
+- `evclaw-entry-gate`
+- `evclaw-hip3-entry-gate`
+- `evclaw-exit-decider`
+- `evclaw-hip3-exit-decider`
+- `evclaw-learning-reflector`
+
 Control helper skill installation with:
 - `EVCLAW_INSTALL_EXTRA_SKILLS=0` to skip
 - `EVCLAW_EXTRA_SKILLS=trade,execute,best3,stats,hedge` to customize
 - `EVCLAW_OPENCLAW_SKILLS_DIR=/your/path` to change target skills directory
+- `EVCLAW_INSTALL_ISOLATED_AGENTS=0` to skip isolated-agent provisioning
 
 Optional Lighter dependency install:
 - `EVCLAW_INSTALL_LIGHTER_DEPS=1 ./bootstrap.sh`

@@ -30,9 +30,9 @@ def _normalize_agent_id(value: str | None) -> str | None:
 
 def _hip3_runtime_overrides() -> dict:
     hip3_agent_id = _normalize_agent_id(
-        (env_str("EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID", "") or "").strip()
-        or (env_str("EVCLAW_EXIT_DECIDER_AGENT_ID", "") or "").strip()
-        or "default"
+        (env_str("EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID", "evclaw-hip3-exit-decider") or "").strip()
+        or (env_str("EVCLAW_EXIT_DECIDER_AGENT_ID", "evclaw-exit-decider") or "").strip()
+        or "evclaw-hip3-exit-decider"
     )
     hip3_model_raw = (env_str("EVCLAW_HIP3_EXIT_DECIDER_MODEL", "") or "").strip()
     if hip3_model_raw.lower() in {"default", "openclaw-default"}:

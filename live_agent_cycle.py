@@ -323,18 +323,18 @@ async def generate_cycle_candidates_file(
             if gate_mode == "hip3":
                 mode_agent_id = (
                     env_str("EVCLAW_HIP3_LLM_GATE_AGENT_ID", "")
-                    or env_str("EVCLAW_LLM_GATE_AGENT_ID", "default")
-                    or "default"
-                ).strip() or "default"
+                    or env_str("EVCLAW_LLM_GATE_AGENT_ID", "evclaw-entry-gate")
+                    or "evclaw-hip3-entry-gate"
+                ).strip() or "evclaw-hip3-entry-gate"
                 mode_model = (
                     env_str("EVCLAW_HIP3_LLM_GATE_MODEL", "")
                     or "openai-codex/gpt-5.2"
                 ).strip() or None
             else:
                 mode_agent_id = (
-                    env_str("EVCLAW_LLM_GATE_AGENT_ID", "default")
-                    or "default"
-                ).strip() or "default"
+                    env_str("EVCLAW_LLM_GATE_AGENT_ID", "evclaw-entry-gate")
+                    or "evclaw-entry-gate"
+                ).strip() or "evclaw-entry-gate"
                 mode_model = (
                     env_str("EVCLAW_LLM_GATE_MODEL", "")
                     or "openai-codex/gpt-5.2"
