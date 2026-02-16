@@ -179,6 +179,7 @@ After bootstrap, these user-facing helper skills are available:
 ## Troubleshooting
 
 - If no trades appear, verify OpenClaw agent IDs and provider config.
+- If cron shows `delivery target is missing`, set `EVCLAW_OPENCLAW_CRON_CHANNEL` (default `main`) or `EVCLAW_OPENCLAW_CRON_TO` in `.env`, then rerun `./scripts/install_openclaw_crons.sh`.
 - If SSE fails, verify tracker endpoint/key in `.env`.
 - If SSE/node2 returns 401/403, approve builder fee for your wallet at `https://atsetup.evplus.ai/`.
 - If HL auth fails, verify `HYPERLIQUID_ADDRESS` and `HYPERLIQUID_AGENT_PRIVATE_KEY`.

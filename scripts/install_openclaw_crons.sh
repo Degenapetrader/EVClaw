@@ -14,9 +14,9 @@ fi
 
 OPENCLAW_CMD="${OPENCLAW_CMD:-openclaw}"
 CRON_AGENT="${EVCLAW_OPENCLAW_CRON_AGENT:-main}"
-CRON_CHANNEL="${EVCLAW_OPENCLAW_CRON_CHANNEL:-main}"
-CRON_TO="${EVCLAW_OPENCLAW_CRON_TO:-}"
-if [[ -z "${CRON_CHANNEL//[[:space:]]/}" && -z "${CRON_TO//[[:space:]]/}" ]]; then
+CRON_TO="$(printf '%s' "${EVCLAW_OPENCLAW_CRON_TO:-}" | xargs)"
+CRON_CHANNEL="$(printf '%s' "${EVCLAW_OPENCLAW_CRON_CHANNEL:-}" | xargs)"
+if [[ -z "$CRON_CHANNEL" && -z "$CRON_TO" ]]; then
   CRON_CHANNEL="main"
 fi
 
@@ -132,20 +132,29 @@ add_system_event_job() {
 
   local payload
   payload="$(
-    NAME="$name" EXPR="$expr" TEXT="$text" python3 - <<'PY'
+    NAME="$name" EXPR="$expr" TEXT="$text" CRON_CHANNEL="$CRON_CHANNEL" CRON_TO="$CRON_TO" python3 - <<'PY'
 import json
 import os
 
+channel = str(os.environ.get("CRON_CHANNEL") or "").strip()
+to = str(os.environ.get("CRON_TO") or "").strip()
+delivery = {"mode": "announce"}
+if channel:
+    delivery["channel"] = channel
+if to:
+    delivery["to"] = to
+
+job = {
+    "name": os.environ.get("NAME", ""),
+    "schedule": {"kind": "cron", "expr": os.environ.get("EXPR", "0 * * * *")},
+    "payload": {"kind": "systemEvent", "text": os.environ.get("TEXT", "")},
+    "sessionTarget": "isolated",
+}
+if delivery.get("channel") or delivery.get("to"):
+    job["delivery"] = delivery
+
 print(
-    json.dumps(
-        {
-            "name": os.environ.get("NAME", ""),
-            "schedule": {"kind": "cron", "expr": os.environ.get("EXPR", "0 * * * *")},
-            "payload": {"kind": "systemEvent", "text": os.environ.get("TEXT", "")},
-            "sessionTarget": "isolated",
-            "delivery": {"mode": "announce", "channel": "main"},
-        }
-    )
+    json.dumps(job)
 )
 PY
   )"
