@@ -57,6 +57,32 @@ cp .env.example .env
 
 Default target is `~/.openclaw/skills` (override with `EVCLAW_OPENCLAW_SKILLS_DIR`).
 
+## Optional: import historical learning (opt-in)
+
+This is optional and intentionally NOT part of `bootstrap.sh`.
+Use it only when the user explicitly agrees.
+
+Maintainer side (export from `hl-trader`):
+
+```bash
+cd /root/clawd/skills/hl-trader
+python3 scripts/export_learning_seed.py --out /tmp/evclaw-learning-seed.tgz
+```
+
+User side (import into EVClaw):
+
+```bash
+cd /path/to/EVClaw
+python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz --apply
+```
+
+Pros:
+- Better trading knowledge from real trade history.
+
+Cons:
+- Usually fewer trades than a fresh start profile.
+- If many users import the same seed, behavior can become similar across users.
+
 ## Required environment variables
 
 At minimum set:

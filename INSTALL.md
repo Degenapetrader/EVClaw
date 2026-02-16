@@ -42,6 +42,19 @@ Optional Lighter dependency install:
 
 `bootstrap.sh` auto-sets `EVCLAW_ROOT` in `.env` to the current repo path so path-dependent defaults stay portable on any machine/location.
 
+## Optional learning warm-start (user-consent only)
+Not included in bootstrap by design.
+
+Import command:
+```bash
+python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz --apply
+```
+
+Dry-run preview:
+```bash
+python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz
+```
+
 ## Required EVPlus Endpoints
 EVClaw is network-first and expects EVPlus services by default:
 - Tracker SSE/API: `tracker.evplus.ai` (port `8443`, endpoint `/sse/tracker`)
