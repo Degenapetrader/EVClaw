@@ -176,11 +176,11 @@ PY
 }
 
 install_deterministic_job() {
-  if add_cron_job "$JOB_NAME" "*/15 * * * *" "$hourly_message" "$CRON_CHANNEL" "$CRON_TO"; then
+  if add_system_event_job "$JOB_NAME" "*/15 * * * *" "$hourly_message" "$CRON_CHANNEL" "$CRON_TO"; then
     return 0
   fi
   if [[ "$AUTO_CHANNEL_FALLBACK" == "1" ]]; then
-    add_cron_job "$JOB_NAME" "*/15 * * * *" "$hourly_message" "webchat" ""
+    add_system_event_job "$JOB_NAME" "*/15 * * * *" "$hourly_message" "webchat" ""
     return 0
   fi
   return 1
