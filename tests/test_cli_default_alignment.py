@@ -17,7 +17,7 @@ import cli
         ("enable_sltp_backstop", True),
         ("use_fill_reconciler", True),
         ("write_positions_yaml", False),
-        ("min_position_notional_usd", 100.0),
+        ("min_position_notional_usd", 20.0),
         ("min_entry_fill_ratio", 0.05),
         ("chase_entry_tif", "Alo"),
         ("chase_exit_tif", "Alo"),

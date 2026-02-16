@@ -144,7 +144,7 @@ def build_execution_config(config: Dict[str, Any], dry_run: bool) -> ExecutionCo
         enable_trade_tracker=EXECUTOR_ENABLE_TRADE_TRACKER,
         use_fill_reconciler=EXECUTOR_USE_FILL_RECONCILER,
         dust_notional_usd=float(exec_cfg.get('dust_notional_usd', cfg.get('dust_notional_usd', 10.0))),
-        min_position_notional_usd=float(exec_cfg.get('min_position_notional_usd', cfg.get('min_position_notional_usd', 100.0))),
+        min_position_notional_usd=float(exec_cfg.get('min_position_notional_usd', cfg.get('min_position_notional_usd', 20.0))),
         min_entry_fill_ratio=float(exec_cfg.get('min_entry_fill_ratio', cfg.get('min_entry_fill_ratio', 0.05))),
         min_entry_fill_notional_usd=float(exec_cfg.get('min_entry_fill_notional_usd', cfg.get('min_entry_fill_notional_usd', 250.0))),
         chase_entry_tif=str(exec_cfg.get('chase_entry_tif', cfg.get('chase_entry_tif', 'Alo'))),

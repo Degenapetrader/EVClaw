@@ -98,7 +98,7 @@ Context direction is one of:
 
 ### Practical note: min notional gate
 Even if a trade is selected, executor will **skip** entry if computed size is below:
-- `executor.min_position_notional_usd` (currently **$500**)
+- `executor.min_position_notional_usd` (currently **$20**)
 
 ---
 
