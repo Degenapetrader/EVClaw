@@ -184,6 +184,7 @@ Core sessions include:
 After bootstrap, these user-facing helper skills are available:
 - `/trade <SYMBOL>`
 - `/execute <PLAN_ID> chase|limit [ttl]`
+- `/execute <long|short> <SYMBOL> <chase|limit> [size_usd] [ttl]` (asks missing size and requires explicit confirm)
 - `/best3`
 - `/hedge`
 - `/stats`

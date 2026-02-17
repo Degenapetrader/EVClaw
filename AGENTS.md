@@ -65,6 +65,7 @@ Do not invent payload keys/endpoints.
 Manual/interactive commands (not for scheduled cron turns):
 - Idea/plan: `/trade <SYMBOL>` or `/best3`
 - Execute existing plan: `/execute <PLAN_ID> chase|limit [ttl]`
+- Execute ad-hoc manual trade: `/execute <long|short> <SYMBOL> <chase|limit> [size_usd] [ttl]` (requires explicit confirm)
 - Hedge proposal: `/hedge`
 - Status snapshot: `/stats`
 
