@@ -46,7 +46,8 @@ from ai_trader_db import AITraderDB
 
 SKILL_DIR = Path(__file__).parent
 MEMORY_DIR = SKILL_DIR / 'memory'
-EXECUTOR_DB_PATH = os.getenv("EVCLAW_DB_PATH", str(SKILL_DIR / "ai_trader.db"))
+_EVCLAW_DB_PATH_ENV = (os.getenv("EVCLAW_DB_PATH") or "").strip()
+EXECUTOR_DB_PATH = _EVCLAW_DB_PATH_ENV or str(SKILL_DIR / "ai_trader.db")
 EXECUTOR_RATE_LIMIT_TOKENS = 40
 EXECUTOR_RATE_LIMIT_WINDOW_SECONDS = 60
 EXECUTOR_USE_DB_POSITIONS = True

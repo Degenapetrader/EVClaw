@@ -116,6 +116,17 @@ if grep -q '^EVCLAW_ROOT=' .env; then
 else
   printf "\nEVCLAW_ROOT=%s\n" "$DIR" >> .env
 fi
+
+DB_DEFAULT_PATH="$DIR/ai_trader.db"
+DB_ESCAPED="$(printf '%s\n' "$DB_DEFAULT_PATH" | sed 's/[&|]/\\&/g')"
+if grep -q '^EVCLAW_DB_PATH=' .env; then
+  DB_CURRENT="$(grep '^EVCLAW_DB_PATH=' .env | tail -n 1 | cut -d= -f2- | tr -d '[:space:]')"
+  if [[ -z "$DB_CURRENT" ]]; then
+    sed -i "s|^EVCLAW_DB_PATH=.*|EVCLAW_DB_PATH=$DB_ESCAPED|" .env
+  fi
+else
+  printf "EVCLAW_DB_PATH=%s\n" "$DB_DEFAULT_PATH" >> .env
+fi
 export EVCLAW_ROOT="$DIR"
 
 # shellcheck disable=SC1091
