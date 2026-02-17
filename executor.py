@@ -478,7 +478,7 @@ class Executor:
 
         # Exchange adapters + router
         self.lighter = LighterAdapter(self.log, dry_run=self.config.dry_run)
-        self.hyperliquid = HyperliquidAdapter(self.log, dry_run=self.config.dry_run, account_mode="vault")
+        self.hyperliquid = HyperliquidAdapter(self.log, dry_run=self.config.dry_run, account_mode="wallet")
         # Keep a compatibility alias for code paths that still reference
         # `executor.hip3_wallet`; it now points to the same Hyperliquid adapter.
         self.hip3_wallet = self.hyperliquid

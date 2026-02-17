@@ -525,7 +525,7 @@ async def get_equity_for_venue(
 
     if venue == VENUE_HYPERLIQUID:
         adapter = executor.hyperliquid
-        address = getattr(adapter, "_vault_address", None) or getattr(adapter, "_address", None)
+        address = getattr(adapter, "_address", None)
         if address:
             try:
                 state = await fetch_hl_state_http_fn(address, hl_base_url)
@@ -571,7 +571,7 @@ async def get_hl_equity_for_account(
         return float(fallback), "fallback_dry_run"
 
     adapter = executor.hyperliquid
-    address = getattr(adapter, "_vault_address", None) or getattr(adapter, "_address", None)
+    address = getattr(adapter, "_address", None)
 
     if not address:
         return float(fallback), "missing_address"

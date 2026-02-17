@@ -34,7 +34,6 @@ TRADE_SCRIPTS_DIR = EVCLAW_ROOT / "openclaw_skills" / "trade" / "scripts"
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
 DB_PATH_DEFAULT = str(Path(os.getenv("EVCLAW_DB_PATH") or (EVCLAW_ROOT / "ai_trader.db")))
 DEFAULT_WALLET = (os.getenv("HYPERLIQUID_ADDRESS") or "").strip()
-DEFAULT_VAULT = os.getenv("VAULT_ADDRESS", "").strip() or None
 DOTENV_PATH = str(EVCLAW_ROOT / ".env")
 
 
@@ -279,16 +278,7 @@ def main() -> int:
     live_err = None
     mids: Dict[str, float] = {}
 
-    # Live-first accounts: wallet + optional legacy VAULT_ADDRESS account.
-    vault = (os.getenv("VAULT_ADDRESS") or "").strip() or None
-    if not vault:
-        vault = _dotenv_get(DOTENV_PATH, "VAULT_ADDRESS")
-    if vault and vault.startswith("0x"):
-        vault = vault.lower()
-
     accounts: List[Tuple[str, str]] = [("wallet", wallet)]
-    if vault and vault != wallet:
-        accounts.append(("vault", vault))
 
     all_positions: List[LivePosition] = []
     all_open_orders: List[Dict[str, Any]] = []
@@ -370,8 +360,6 @@ def main() -> int:
     lines: List[str] = []
     lines.append("Wallet stats")
     lines.append(f"- Wallet: {wallet[:6]}…{wallet[-4:]}")
-    if vault and vault != wallet:
-        lines.append(f"- Perps account (legacy vault): {vault[:6]}…{vault[-4:]}")
 
     if equity is not None:
         lines.append(f"- Equity (HL, live): {_fmt_usd(float(equity))}")
@@ -382,7 +370,7 @@ def main() -> int:
         f"- Exposure (HL): net {_fmt_usd(net)} | long {_fmt_usd(long_notional)} | short {_fmt_usd(short_notional)}"
     )
 
-    # 24h account volume (live): sum(|px*sz|) from userFillsByTime for wallet + legacy vault.
+    # 24h account volume (live): sum(|px*sz|) from userFillsByTime for wallet.
     vol24_usd = None
     try:
         end_ms = int(_utc_now() * 1000)

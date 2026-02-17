@@ -309,7 +309,7 @@ async def build_reconciler(
     if venue == VENUE_LIGHTER:
         adapter = LighterAdapter(log, dry_run=dry_run)
     elif venue == VENUE_HYPERLIQUID:
-        adapter = HyperliquidAdapter(log, dry_run=dry_run, account_mode="vault")
+        adapter = HyperliquidAdapter(log, dry_run=dry_run, account_mode="wallet")
     else:
         raise ValueError(f"Unknown venue: {venue}")
 
@@ -395,7 +395,7 @@ async def main() -> int:
         "--venue",
         choices=[
             "lighter", "hyperliquid", "hip3",
-            "hl_vault", "hl_wallet", "lighter_wallet",
+            "hl_wallet", "lighter_wallet",
             "all",
         ],
         default="all",

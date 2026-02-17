@@ -142,12 +142,11 @@ class HyperliquidAdapter(ExchangeAdapter):
         super().__init__(log)
         self.dry_run = dry_run
         normalized_mode = (account_mode or "wallet").strip().lower()
-        if normalized_mode == "vault":
-            normalized_mode = "wallet"
-            self.log.info(
-                "account_mode='vault' is legacy; using unified wallet mode"
+        if normalized_mode != "wallet":
+            self.log.warning(
+                f"Unsupported account_mode={normalized_mode!r}; forcing unified wallet mode"
             )
-        self.account_mode = normalized_mode
+        self.account_mode = "wallet"
 
         # Last error string from order placement (best-effort; for executor retries)
         self.last_order_error: Optional[str] = None
@@ -155,7 +154,6 @@ class HyperliquidAdapter(ExchangeAdapter):
         # Wallet / addresses
         self.wallet = None                         # eth_account LocalAccount
         self._address: Optional[str] = None        # HYPERLIQUID_ADDRESS
-        self._vault_address: Optional[str] = None  # Legacy alias; kept for compatibility
         # HIP3 wallet override (xyz: symbols only)
         self._hip3_wallet = None                   # eth_account LocalAccount
         self._hip3_address: Optional[str] = None   # HIP3 wallet address (same as _address in unified mode)
@@ -276,11 +274,8 @@ class HyperliquidAdapter(ExchangeAdapter):
         """Get user address for queries."""
         return self._address or ""
 
-    def _vault_address_for_symbol(self, symbol: str) -> Optional[str]:
-        """Get vault address used in signed payload.
-
-        Unified account model does not use vault delegation.
-        """
+    def _signing_subaccount_for_symbol(self, symbol: str) -> Optional[str]:
+        """Return signing subaccount override (unused in unified wallet mode)."""
         return None
 
     def _hip3_coin_set(self) -> set:
@@ -612,7 +607,6 @@ class HyperliquidAdapter(ExchangeAdapter):
             # 1. Wallet from delegated agent signer key
             self.wallet = Account.from_key(agent_signer_key)
             self._address = address
-            self._vault_address = None
             # Unified wallet model: same signer/address for all venue flows.
             self._hip3_wallet = self.wallet
             self._hip3_address = self._address
@@ -1043,11 +1037,11 @@ class HyperliquidAdapter(ExchangeAdapter):
         order_wire = order_request_to_order_wire(order_req, asset_id)
 
         # Unified routing uses the same wallet for all symbols.
-        vault_for_symbol = self._vault_address_for_symbol(symbol)
+        subaccount_for_symbol = self._signing_subaccount_for_symbol(symbol)
         is_hip3 = self._is_hip3(symbol)
         if is_hip3:
             self.log.debug(f"HIP3 routing: {symbol} → unified wallet")
-        builder_info = None if vault_for_symbol else {
+        builder_info = None if subaccount_for_symbol else {
             "b": BUILDER_ADDRESS.lower(),
             "f": BUILDER_FEE_INT,
         }
@@ -1058,7 +1052,7 @@ class HyperliquidAdapter(ExchangeAdapter):
         signature = sign_l1_action(
             wallet_for_symbol,
             order_action,
-            vault_for_symbol,
+            subaccount_for_symbol,
             timestamp,
             None,   # expires_after
             True,   # is_mainnet
@@ -1068,7 +1062,7 @@ class HyperliquidAdapter(ExchangeAdapter):
             "action": order_action,
             "nonce": timestamp,
             "signature": signature,
-            "vaultAddress": vault_for_symbol,
+            "vaultAddress": subaccount_for_symbol,
             "expiresAfter": None,
         }
 
@@ -1462,8 +1456,8 @@ class HyperliquidAdapter(ExchangeAdapter):
             order_wire = order_request_to_order_wire(order_req, asset_id)
 
             # Unified routing uses the same wallet for all symbols.
-            vault_for_symbol = self._vault_address_for_symbol(symbol)
-            builder_info = None if vault_for_symbol else {
+            subaccount_for_symbol = self._signing_subaccount_for_symbol(symbol)
+            builder_info = None if subaccount_for_symbol else {
                 "b": BUILDER_ADDRESS.lower(),
                 "f": BUILDER_FEE_INT,
             }
@@ -1473,7 +1467,7 @@ class HyperliquidAdapter(ExchangeAdapter):
             wallet_for_symbol = self._wallet_for_symbol(symbol)
             signature = sign_l1_action(
                 wallet_for_symbol, order_action,
-                vault_for_symbol,
+                subaccount_for_symbol,
                 timestamp, None, True,
             )
 
@@ -1481,7 +1475,7 @@ class HyperliquidAdapter(ExchangeAdapter):
                 "action": order_action,
                 "nonce": timestamp,
                 "signature": signature,
-                "vaultAddress": vault_for_symbol,
+                "vaultAddress": subaccount_for_symbol,
                 "expiresAfter": None,
             }
 
@@ -1524,13 +1518,13 @@ class HyperliquidAdapter(ExchangeAdapter):
             }
 
             # Unified routing uses the same wallet for all symbols.
-            vault_for_symbol = self._vault_address_for_symbol(symbol)
+            subaccount_for_symbol = self._signing_subaccount_for_symbol(symbol)
 
             timestamp = get_timestamp_ms()
             wallet_for_symbol = self._wallet_for_symbol(symbol)
             signature = sign_l1_action(
                 wallet_for_symbol, cancel_action,
-                vault_for_symbol,
+                subaccount_for_symbol,
                 timestamp, None, True,
             )
 
@@ -1538,7 +1532,7 @@ class HyperliquidAdapter(ExchangeAdapter):
                 "action": cancel_action,
                 "nonce": timestamp,
                 "signature": signature,
-                "vaultAddress": vault_for_symbol,
+                "vaultAddress": subaccount_for_symbol,
                 "expiresAfter": None,
             }
 
@@ -2055,7 +2049,7 @@ class HyperliquidAdapter(ExchangeAdapter):
             )
             hip3_user = (self._hip3_address or self._address or "").strip()
             perps_user = (address or "").strip()
-            if self.account_mode != "wallet" and include_wallet_hip3_fills and hip3_coins and hip3_user and hip3_user.lower() != perps_user.lower():
+            if include_wallet_hip3_fills and hip3_coins and hip3_user and hip3_user.lower() != perps_user.lower():
                 try:
                     wallet_raw = await self._post_public({"type": "userFills", "user": hip3_user})
                     if not isinstance(wallet_raw, list):

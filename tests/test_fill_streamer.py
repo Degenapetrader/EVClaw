@@ -31,9 +31,8 @@ class DummyLighterAdapter(DummyAdapter):
 
 
 class DummyHyperliquidAdapter(DummyAdapter):
-    def __init__(self, address: str, vault_address: Optional[str] = None, hip3_address: Optional[str] = None):
+    def __init__(self, address: str, hip3_address: Optional[str] = None):
         self._address = address
-        self._vault_address = vault_address
         self._hip3_address = hip3_address
 
     def _detect_sign_change(self, fill):
@@ -201,7 +200,6 @@ def test_hyperliquid_streamer_uses_wallet_address_for_wallet_venue() -> None:
 
     adapter = DummyHyperliquidAdapter(
         address="0xwallet",
-        vault_address="0xvault",
         hip3_address="0xhip3",
     )
     rec_hl = FillReconciler(db_path=db_path, exchange_adapter=adapter, venue="hyperliquid")
@@ -210,5 +208,5 @@ def test_hyperliquid_streamer_uses_wallet_address_for_wallet_venue() -> None:
     hl_stream = HyperliquidFillStreamer(rec_hl, adapter, "hyperliquid")
     wallet_stream = HyperliquidFillStreamer(rec_wallet, adapter, "hip3")
 
-    assert hl_stream._address == "0xvault"
-    assert wallet_stream._address == "0xvault"
+    assert hl_stream._address == "0xwallet"
+    assert wallet_stream._address == "0xwallet"

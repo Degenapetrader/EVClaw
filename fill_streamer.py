@@ -317,7 +317,7 @@ class HyperliquidFillStreamer(BaseFillStreamer):
     def __init__(self, reconciler: FillReconciler, adapter: Any, venue: str = VENUE_HYPERLIQUID):
         super().__init__(venue, reconciler, adapter, HYPERLIQUID_WS_URL)
         # Single Hyperliquid venue is used for both canonical and alias inputs.
-        self._address = getattr(adapter, "_vault_address", None) or getattr(adapter, "_address", None)
+        self._address = getattr(adapter, "_address", None)
 
     async def _subscribe(self, ws: aiohttp.ClientWebSocketResponse) -> None:
         if not self._address:

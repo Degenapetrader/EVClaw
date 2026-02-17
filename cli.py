@@ -1795,7 +1795,7 @@ def main():
     exec_parser.add_argument('--size-usd', required=True, type=float, help='Position size in USD')
     exec_parser.add_argument('--venue', required=True, choices=[
         'hyperliquid', 'hip3', 'lighter',
-        'hl_vault', 'hl_wallet', 'lighter_wallet',
+        'hl_wallet', 'lighter_wallet',
     ],
                               help='Target exchange venue')
     exec_parser.add_argument('--dry-run', action='store_true', help='Dry run (no real orders)')
@@ -1813,7 +1813,7 @@ def main():
     trade_parser.add_argument('size_usd', type=float, help='Position notional in USD')
     trade_parser.add_argument('--venue', required=True, choices=[
         'hyperliquid', 'hip3', 'lighter',
-        'hl_vault', 'hl_wallet', 'lighter_wallet',
+        'hl_wallet', 'lighter_wallet',
     ],
                               help='Target exchange venue')
     trade_parser.add_argument('--dry-run', action='store_true', help='Dry run (no real orders)')
@@ -1830,7 +1830,7 @@ def main():
     pos_parser.add_argument('--close', metavar='SYMBOL', help='Close position for symbol')
     pos_parser.add_argument('--venue', choices=[
         'hyperliquid', 'hip3', 'lighter',
-        'hl_vault', 'hl_wallet', 'lighter_wallet',
+        'hl_wallet', 'lighter_wallet',
     ],
                              help='Target exchange venue (required with --close)')
     pos_parser.add_argument('--reason', default=None, help='Exit reason override (e.g., DECAY_EXIT)')

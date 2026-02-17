@@ -218,7 +218,7 @@ def extract_sltp_states(
 
 
 async def get_hyperliquid_equity(hl: HyperliquidAdapter, *, address: Optional[str] = None, dex: Optional[str] = None) -> float:
-    address = address or hl._vault_address or hl._address
+    address = address or hl._address
     if not address:
         return 0.0
     try:
@@ -881,9 +881,9 @@ async def run_monitor(
             hip3_unrealized = sum_unrealized(hip3_positions)
             lighter_unrealized = sum_unrealized(lighter_positions)
 
-            # Perps equity from wallet (legacy VAULT_ADDRESS still supported).
+            # Perps equity from unified wallet account.
             hl_equity = (
-                await get_hyperliquid_equity(hl, address=(hl._vault_address or hl._address), dex=None)
+                await get_hyperliquid_equity(hl, address=hl._address, dex=None)
                 if hl is not None
                 else 0.0
             )

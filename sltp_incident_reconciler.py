@@ -6,7 +6,7 @@ DB incident (e.g., TP order exists but incident remains OPEN).
 
 This script:
 - Loads OPEN incidents from `sltp_incidents_v1`
-- Fetches live `frontendOpenOrders` for wallet (with legacy VAULT_ADDRESS fallback)
+- Fetches live `frontendOpenOrders` for wallet
 - For each incident, checks if the expected order exists (best-effort)
 - If found, resolves the incident in DB with a note.
 

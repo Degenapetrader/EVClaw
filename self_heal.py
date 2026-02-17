@@ -163,7 +163,7 @@ def _fetch_positions(
     *,
     info_url: str,
     public_info_url: str,
-    vault_user: str,
+    perps_user: str,
     wallet_user: str,
     builder_dex: str,
     scope: str,
@@ -196,8 +196,8 @@ def _fetch_positions(
                 "entry_price": _safe_float(pos.get("entryPx", pos.get("entry_price", 0.0)), 0.0),
             }
 
-    if scope in {"all", "perps"} and vault_user:
-        st = _post_info(info_url, {"type": "clearinghouseState", "user": vault_user})
+    if scope in {"all", "perps"} and perps_user:
+        st = _post_info(info_url, {"type": "clearinghouseState", "user": perps_user})
         _add_positions(st if isinstance(st, dict) else {}, VENUE_PERPS)
 
     if scope in {"all", "builder"} and wallet_user:
@@ -214,7 +214,7 @@ def _fetch_open_orders(
     *,
     info_url: str,
     public_info_url: str,
-    vault_user: str,
+    perps_user: str,
     wallet_user: str,
     builder_dex: str,
     scope: str,
@@ -233,8 +233,8 @@ def _fetch_open_orders(
             key = (coin, venue_resolved)
             out.setdefault(key, []).append(o)
 
-    if scope in {"all", "perps"} and vault_user:
-        rows = _post_info(info_url, {"type": "openOrders", "user": vault_user})
+    if scope in {"all", "perps"} and perps_user:
+        rows = _post_info(info_url, {"type": "openOrders", "user": perps_user})
         _add_orders(rows if isinstance(rows, list) else [], VENUE_PERPS)
 
     if scope in {"all", "builder"} and wallet_user:
@@ -665,7 +665,7 @@ async def _run(args: argparse.Namespace) -> int:
         public_info_url = public_info_url.rstrip("/") + "/info"
 
     wallet = (args.wallet or _env("HYPERLIQUID_ADDRESS", dotenv)).strip()
-    vault = wallet
+    perps_user = wallet
     builder_dex = "xyz"
 
     report: Dict[str, Any] = {
@@ -696,8 +696,8 @@ async def _run(args: argparse.Namespace) -> int:
 
     if args.scope in {"all", "builder"} and not wallet:
         report["errors"].append("missing_wallet_for_builder_scope")
-    if args.scope in {"all", "perps"} and not vault:
-        report["errors"].append("missing_vault_for_perps_scope")
+    if args.scope in {"all", "perps"} and not perps_user:
+        report["errors"].append("missing_wallet_for_perps_scope")
     if report["errors"]:
         report["finished_at"] = _now_utc_iso()
         Path(args.json_out).write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
@@ -709,7 +709,7 @@ async def _run(args: argparse.Namespace) -> int:
         live_positions = _fetch_positions(
             info_url=info_url,
             public_info_url=public_info_url,
-            vault_user=vault,
+            perps_user=perps_user,
             wallet_user=wallet,
             builder_dex=builder_dex,
             scope=args.scope,
@@ -717,7 +717,7 @@ async def _run(args: argparse.Namespace) -> int:
         orders_by_key = _fetch_open_orders(
             info_url=info_url,
             public_info_url=public_info_url,
-            vault_user=vault,
+            perps_user=perps_user,
             wallet_user=wallet,
             builder_dex=builder_dex,
             scope=args.scope,
@@ -762,7 +762,7 @@ async def _run(args: argparse.Namespace) -> int:
         live_positions_after = _fetch_positions(
             info_url=info_url,
             public_info_url=public_info_url,
-            vault_user=vault,
+            perps_user=perps_user,
             wallet_user=wallet,
             builder_dex=builder_dex,
             scope=args.scope,
@@ -770,7 +770,7 @@ async def _run(args: argparse.Namespace) -> int:
         orders_by_key_after = _fetch_open_orders(
             info_url=info_url,
             public_info_url=public_info_url,
-            vault_user=vault,
+            perps_user=perps_user,
             wallet_user=wallet,
             builder_dex=builder_dex,
             scope=args.scope,

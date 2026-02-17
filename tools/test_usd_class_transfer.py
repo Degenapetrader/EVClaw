@@ -11,9 +11,7 @@ Safety:
 - Requires --execute to actually submit the transfer.
 
 Notes:
-- In our deployment, perps run on the vault/subaccount (VAULT_ADDRESS). If
-  VAULT_ADDRESS is set, the SDK appends "subaccount:<VAULT_ADDRESS>" to the
-  amount string.
+- EVClaw uses unified wallet mode (no subaccount routing).
 """
 
 from __future__ import annotations
@@ -80,7 +78,6 @@ def main() -> int:
     base_url = os.getenv("HYPERLIQUID_PUBLIC_URL", "https://api.hyperliquid.xyz").strip().rstrip("/")
     priv = (os.getenv("HYPERLIQUID_AGENT_PRIVATE_KEY", "") or "").strip()
     addr = (os.getenv("HYPERLIQUID_ADDRESS", "") or "").strip()
-    vault = (os.getenv("VAULT_ADDRESS", "") or "").strip() or None
 
     if not priv or not addr:
         raise SystemExit("Missing HYPERLIQUID_AGENT_PRIVATE_KEY or HYPERLIQUID_ADDRESS in env")
@@ -92,7 +89,6 @@ def main() -> int:
     direction = "perp->spot" if args.to_spot else "spot->perp"
     print(f"Base URL: {base_url}")
     print(f"Address: {addr}")
-    print(f"Vault: {vault or '(none)'}")
     print(f"Direction: {direction}")
     print(f"Amount: {args.amount}")
     print(f"Spot USDC before: {spot_before:.6f}")
@@ -103,7 +99,7 @@ def main() -> int:
         return 0
 
     wallet = Account.from_key(priv)
-    ex = Exchange(wallet=wallet, base_url=base_url, vault_address=vault)
+    ex = Exchange(wallet=wallet, base_url=base_url)
 
     # Exchange.usd_class_transfer(to_perp=True) means transfer to perp.
     to_perp = not args.to_spot

@@ -126,7 +126,6 @@ def test_get_equity_for_venue_hl_uses_http_state_fetch(monkeypatch) -> None:
             return None
 
     class DummyHLAdapter:
-        _vault_address = "0xabc"
         _address = "0xdef"
 
         async def _post_public(self, _payload):  # pragma: no cover - should not be used here

@@ -15,20 +15,19 @@ from exchanges.hyperliquid_adapter import HyperliquidAdapter
 @pytest.mark.asyncio
 async def test_get_all_positions_includes_hip3_from_dex_xyz() -> None:
     log = logging.getLogger("test")
-    a = HyperliquidAdapter(log=log, dry_run=False, account_mode="vault")
+    a = HyperliquidAdapter(log=log, dry_run=False, account_mode="wallet")
 
     # Minimal init state
     a._initialized = True
     a._address = "0xUSER"
-    a._vault_address = "0xVAULT"
     a._hip3_address = "0xUSER"
 
     # Pretend metadata includes ORCL as a hip3 coin so hip3_only filter passes.
     a._asset_map = {"xyz:ORCL": 123456}
 
     async def fake_post_public(payload):
-        # Main perps positions (vault)
-        if payload.get("user") == "0xVAULT" and payload.get("dex") is None:
+        # Main perps positions (wallet, unified mode)
+        if payload.get("user") == "0xUSER" and payload.get("dex") is None:
             return {"assetPositions": []}
         # HIP3 positions must be fetched with dex=xyz
         if payload.get("user") == "0xUSER" and payload.get("dex") == "xyz":
@@ -80,11 +79,10 @@ async def test_wallet_mode_includes_hip3_from_dex_xyz() -> None:
 @pytest.mark.asyncio
 async def test_get_account_trades_keeps_perp_symbol_plain_when_builder_basename_exists(monkeypatch) -> None:
     log = logging.getLogger("test")
-    a = HyperliquidAdapter(log=log, dry_run=False, account_mode="vault")
+    a = HyperliquidAdapter(log=log, dry_run=False, account_mode="wallet")
 
     a._initialized = True
     a._address = "0xUSER"
-    a._vault_address = "0xVAULT"
     a._hip3_address = "0xUSER"
     # Builder metadata includes ZEC basename, but this fill is a plain perp coin.
     a._asset_map = {"HYNA:ZEC": 140000}
@@ -117,11 +115,10 @@ async def test_get_account_trades_keeps_perp_symbol_plain_when_builder_basename_
 @pytest.mark.asyncio
 async def test_get_account_trades_keeps_explicit_builder_prefix() -> None:
     log = logging.getLogger("test")
-    a = HyperliquidAdapter(log=log, dry_run=False, account_mode="vault")
+    a = HyperliquidAdapter(log=log, dry_run=False, account_mode="wallet")
 
     a._initialized = True
     a._address = "0xUSER"
-    a._vault_address = "0xVAULT"
     a._hip3_address = "0xUSER"
 
     async def fake_post_public(payload):
