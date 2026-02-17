@@ -57,9 +57,13 @@ python3 ${EVCLAW_ROOT}/live_agent.py execute \
   --candidates-file ${EVCLAW_RUNTIME_DIR}/evclaw_candidates_12345.json
 ```
 
-### `/execute --cycle-file <path> --symbol <symbol> --direction LONG|SHORT --size-usd <float>`
+### `cli execute --cycle-file <path> --symbol <symbol> --direction LONG|SHORT --size-usd <float>`
 
 Execute a decision from a cycle file (execution-by-call).
+
+Important command split:
+- `/execute <PLAN_ID> chase|limit` -> helper skill plan execution (`openclaw_skills/execute`).
+- `python3 ${EVCLAW_ROOT}/cli.py execute --cycle-file ...` -> low-level executor entrypoint.
 
 **Parameters:**
 | Param | Type | Default | Description |

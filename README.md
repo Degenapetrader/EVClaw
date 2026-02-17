@@ -188,6 +188,10 @@ After bootstrap, these user-facing helper skills are available:
 - `/hedge`
 - `/stats`
 
+Command split:
+- `/execute <PLAN_ID> chase|limit` is helper-skill manual plan execution.
+- `python3 cli.py execute --cycle-file ...` is the low-level cycle executor path.
+
 Operator note:
 - This section is manual/interactive guidance.
 - Scheduled cron jobs must use `AGENTS.md` `CRON_CONTEXT` only.
