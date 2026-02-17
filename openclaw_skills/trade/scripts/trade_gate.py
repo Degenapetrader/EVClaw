@@ -82,7 +82,6 @@ def _build_session_id(prefix: str, *, suffix: Optional[str] = None) -> str:
 class TradeGateConfig:
     enabled: bool
     agent_id: Optional[str]
-    model: Optional[str]
     thinking: Optional[str]
     timeout_sec: float
     openclaw_cmd: str
@@ -92,14 +91,12 @@ class TradeGateConfig:
         enabled = _truthy("EVCLAW_MANUAL_TRADE_GATE_ENABLED", True)
         # Default to OpenClaw "default" agent.
         agent_id = (os.getenv("EVCLAW_MANUAL_TRADE_GATE_AGENT_ID") or "default").strip() or None
-        model = (os.getenv("EVCLAW_MANUAL_TRADE_GATE_MODEL") or "").strip() or None
         thinking = (os.getenv("EVCLAW_MANUAL_TRADE_GATE_THINKING") or "medium").strip() or None
         timeout_sec = max(5.0, _env_float("EVCLAW_MANUAL_TRADE_GATE_TIMEOUT_SEC", 25.0))
         openclaw_cmd = (os.getenv("OPENCLAW_CMD") or os.getenv("CLAWDBOT_CMD") or "openclaw").strip()
         return cls(
             enabled=enabled,
             agent_id=agent_id,
-            model=model,
             thinking=thinking,
             timeout_sec=timeout_sec,
             openclaw_cmd=openclaw_cmd,
@@ -312,7 +309,6 @@ async def run_trade_gate(
         message=prompt,
         session_id=session_id,
         agent_id=cfg.agent_id,
-        model=cfg.model,
         thinking=cfg.thinking,
         timeout_sec=cfg.timeout_sec,
         openclaw_cmd=cfg.openclaw_cmd,
@@ -368,7 +364,6 @@ async def run_trade_gate(
             message=retry_prompt,
             session_id=f"{session_id}_retry1",
             agent_id=cfg.agent_id,
-            model=cfg.model,
             thinking="minimal",
             timeout_sec=min(10.0, float(cfg.timeout_sec)),
             openclaw_cmd=cfg.openclaw_cmd,
