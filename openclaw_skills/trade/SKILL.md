@@ -1,6 +1,6 @@
 ---
 name: trade
-description: Advisor-mode manual trade planner. `/trade <SYMBOL> [long|short] [$SIZE]` returns a compact plan with 2 entry styles (FAST chase vs RESTING limit) and stores it for `/execute`.
+description: "Advisor-mode manual trade planner. `/trade <SYMBOL> [long|short] [$SIZE]` returns a compact plan with 2 entry styles (FAST chase vs RESTING limit) and stores it for `/execute`."
 user-invocable: true
 metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
 ---

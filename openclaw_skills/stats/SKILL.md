@@ -1,6 +1,6 @@
 ---
 name: stats
-description: Deterministic wallet dashboard. `/stats` shows live equity/exposure/positions/health for the user wallet (Hyperliquid + DB fallback) and highlights any missing SL/TP.
+description: "Deterministic wallet dashboard. `/stats` shows live equity/exposure/positions/health for the user wallet (Hyperliquid + DB fallback) and highlights any missing SL/TP."
 user-invocable: true
 metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
 ---

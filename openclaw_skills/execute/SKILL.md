@@ -1,6 +1,6 @@
 ---
 name: execute
-description: Execute manual trades via plan ID or ad-hoc input. Supports `/execute <PLAN_ID> chase|limit [ttl]` and `/execute long ETH chase [size] [ttl]`.
+description: "Execute manual trades via plan ID or ad-hoc input. Supports `/execute <PLAN_ID> chase|limit [ttl]` and `/execute long ETH chase [size] [ttl]`."
 user-invocable: true
 metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
 ---

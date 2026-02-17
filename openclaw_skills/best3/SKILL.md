@@ -1,6 +1,6 @@
 ---
 name: best3
-description: Deterministic manual trade picker. `/best3` returns up to 3 Hyperliquid perp setups (FAST chase vs RESTING SR/ATR limit) and stores each plan for `/execute`.
+description: "Deterministic manual trade picker. `/best3` returns up to 3 Hyperliquid perp setups (FAST chase vs RESTING SR/ATR limit) and stores each plan for `/execute`."
 user-invocable: true
 metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
 ---

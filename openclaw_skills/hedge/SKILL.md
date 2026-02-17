@@ -1,6 +1,6 @@
 ---
 name: hedge
-description: Deterministic portfolio hedge planner. `/hedge` proposes a single BTC/ETH hedge sized to cut Hyperliquid net notional by ~50%, and stores the plan for `/execute`.
+description: "Deterministic portfolio hedge planner. `/hedge` proposes a single BTC/ETH hedge sized to cut Hyperliquid net notional by ~50%, and stores the plan for `/execute`."
 user-invocable: true
 metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
 ---
