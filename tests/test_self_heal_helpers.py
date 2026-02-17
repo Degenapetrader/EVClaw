@@ -94,7 +94,7 @@ def test_detect_incidents_builder_partial_coverage(monkeypatch):
 
     assert len(incidents) == 1
     inc = incidents[0]
-    assert inc["type"] == "unprotected_builder"
+    assert inc["type"] == "stale_oid"
     assert inc["symbol"] == "XYZ:BABA"
     assert inc["covered_size"] == 9.472
     assert inc["expected_size"] == 30.838
@@ -161,7 +161,7 @@ def test_detect_incidents_dedupes_by_symbol_venue_key(monkeypatch):
     assert len(incidents) == 1
     # If dedupe regresses, this can flip to id=100 and break idempotent repair behavior.
     assert incidents[0]["trade_id"] == 200
-    assert incidents[0]["type"] == "unprotected_perps"
+    assert incidents[0]["type"] == "stale_oid"
 
 
 def test_summarize_counts():
@@ -177,8 +177,49 @@ def test_summarize_counts():
         "missing_in_db": 1,
         "unprotected_perps": 1,
         "unprotected_builder": 2,
+        "partial_coverage": 0,
+        "stale_oid": 0,
         "total": 4,
     }
+
+
+def test_detect_incidents_partial_coverage_type(monkeypatch):
+    def _fake_order_status(*, public_info_url, user, oid, cache):
+        return {"status": "open", "orig_size": 1.0, "open_size": 1.0, "filled_size": 0.0}
+
+    monkeypatch.setattr(self_heal, "_order_status", _fake_order_status)
+    incidents = self_heal._detect_incidents(
+        db_trades=[
+            {
+                "id": 1,
+                "symbol": "XYZ:AMD",
+                "venue": "hyperliquid_wallet",
+                "direction": "LONG",
+                "size": 10.0,
+                "entry_price": 100.0,
+                "sl_price": 99.0,
+                "tp_price": 101.0,
+                "sl_order_id": "sl",
+                "tp_order_id": "tp",
+                "state": "ACTIVE",
+            }
+        ],
+        live_positions={
+            ("XYZ:AMD", "hyperliquid_wallet"): {
+                "symbol": "XYZ:AMD",
+                "coin": "AMD",
+                "venue": "hyperliquid_wallet",
+                "direction": "LONG",
+                "size": 10.0,
+                "entry_price": 100.0,
+            }
+        },
+        orders_by_key={("AMD", "hyperliquid_wallet"): [{"coin": "XYZ:AMD", "reduceOnly": True, "sz": "3.0"}]},
+        public_info_url="https://api.hyperliquid.xyz/info",
+        user_by_venue={"hyperliquid": "0xwallet", "hyperliquid_wallet": "0xwallet", "hip3": "0xwallet"},
+    )
+    assert len(incidents) == 1
+    assert incidents[0]["type"] == "partial_coverage"
 
 
 def test_append_private_key_if_needed():
@@ -227,4 +268,4 @@ def test_detect_incidents_hip3_venue_alias_to_builder(monkeypatch):
         user_by_venue={"hyperliquid": "0xwallet", "hyperliquid_wallet": "0xwallet", "hip3": "0xwallet"},
     )
     assert len(incidents) == 1
-    assert incidents[0]["type"] == "unprotected_builder"
+    assert incidents[0]["type"] == "stale_oid"

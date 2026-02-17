@@ -346,15 +346,21 @@ def _evaluate_trade_protection(
             cache=status_cache,
         )["status"]
 
-    protected = (
-        (sl_status in OPENISH)
-        and (tp_status in OPENISH)
-        and (gap_size <= 1e-6)
+    stale_statuses = {"canceled", "rejected", "filled"}
+    stale_oid = (
+        (bool(sl_oid) and sl_status in stale_statuses)
+        or (bool(tp_oid) and tp_status in stale_statuses)
     )
-
+    partial_coverage = gap_size > 1e-6
+    base_unprotected = "unprotected_builder" if ":" in symbol else "unprotected_perps"
     incident_type = ""
-    if not protected:
-        incident_type = "unprotected_builder" if ":" in symbol else "unprotected_perps"
+    if stale_oid:
+        incident_type = "stale_oid"
+    elif partial_coverage:
+        incident_type = "partial_coverage"
+    elif not ((sl_status in OPENISH) and (tp_status in OPENISH)):
+        incident_type = base_unprotected
+    protected = incident_type == ""
 
     return {
         "protected": protected,
@@ -609,6 +615,8 @@ def _summarize(incidents: List[Dict[str, Any]]) -> Dict[str, int]:
         "missing_in_db": 0,
         "unprotected_perps": 0,
         "unprotected_builder": 0,
+        "partial_coverage": 0,
+        "stale_oid": 0,
         "total": len(incidents),
     }
     for inc in incidents:
@@ -801,7 +809,12 @@ async def _run(args: argparse.Namespace) -> int:
         if await ex.initialize():
             try:
                 for inc in incidents_after:
-                    if str(inc.get("type")) not in {"unprotected_perps", "unprotected_builder"}:
+                    if str(inc.get("type")) not in {
+                        "unprotected_perps",
+                        "unprotected_builder",
+                        "partial_coverage",
+                        "stale_oid",
+                    }:
                         continue
                     ok = await _best_effort_close(
                         executor=ex,

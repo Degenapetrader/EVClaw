@@ -72,6 +72,8 @@ class AccountCtx:
     label: str
     user: str
     adapter_key: str
+    dex: str = ""
+    use_frontend_orders: bool = False
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -207,11 +209,19 @@ def _fetch_open_orders(
     info_url: str,
     user: str,
     *,
+    dex: str = "",
+    use_frontend_orders: bool = False,
     fallback_info_url: str = DEFAULT_PUBLIC_INFO_URL,
 ) -> List[Dict[str, Any]]:
+    payload: Dict[str, Any] = {
+        "type": "frontendOpenOrders" if use_frontend_orders else "openOrders",
+        "user": user,
+    }
+    if dex:
+        payload["dex"] = dex
     out = _post_info(
         info_url,
-        {"type": "openOrders", "user": user},
+        payload,
         fallback_info_url=fallback_info_url,
     )
     return out if isinstance(out, list) else []
@@ -221,11 +231,15 @@ def _fetch_clearinghouse_state(
     info_url: str,
     user: str,
     *,
+    dex: str = "",
     fallback_info_url: str = DEFAULT_PUBLIC_INFO_URL,
 ) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"type": "clearinghouseState", "user": user}
+    if dex:
+        payload["dex"] = dex
     out = _post_info(
         info_url,
-        {"type": "clearinghouseState", "user": user},
+        payload,
         fallback_info_url=fallback_info_url,
     )
     return out if isinstance(out, dict) else {}
@@ -247,7 +261,22 @@ def _build_accounts(dotenv: Dict[str, str], adapters: Dict[str, HyperliquidAdapt
     accounts: List[AccountCtx] = []
     wallet_addr = _env("HYPERLIQUID_ADDRESS", dotenv)
     if wallet_addr and "wallet" in adapters:
-        accounts.append(AccountCtx(label="wallet", user=wallet_addr, adapter_key="wallet"))
+        accounts.append(
+            AccountCtx(
+                label="wallet_perps",
+                user=wallet_addr,
+                adapter_key="wallet",
+            )
+        )
+        accounts.append(
+            AccountCtx(
+                label="wallet_builder_xyz",
+                user=wallet_addr,
+                adapter_key="wallet",
+                dex="xyz",
+                use_frontend_orders=True,
+            )
+        )
 
     return accounts
 
@@ -351,12 +380,28 @@ async def _reconcile_pending_orders(
         "cancelled_marked": 0,
         "expired_cancelled": 0,
         "cancel_failures": 0,
+        "pending_snapshot_ts": _now_utc_iso(),
+        "pending_oldest_age_sec": 0,
+        "pending_open_ids": [],
     }
+
+    age_col = "updated_at"
+    try:
+        cols = conn.execute("PRAGMA table_info(pending_orders)").fetchall()
+        names = {str(r[1]) for r in cols}
+        if "updated_at" in names:
+            age_col = "updated_at"
+        elif "created_at" in names:
+            age_col = "created_at"
+        else:
+            age_col = "0"
+    except Exception:
+        age_col = "0"
 
     try:
         rows = conn.execute(
-            """
-            SELECT symbol, venue, exchange_order_id, expires_at
+            f"""
+            SELECT symbol, venue, exchange_order_id, expires_at, {age_col} AS age_ts
             FROM pending_orders
             WHERE state = 'PENDING' AND exchange_order_id IS NOT NULL
             """
@@ -367,6 +412,13 @@ async def _reconcile_pending_orders(
 
     now_ts = time.time()
     out["pending_total"] = len(rows)
+    out["pending_open_ids"] = [str(r["exchange_order_id"] or "").strip() for r in rows if str(r["exchange_order_id"] or "").strip()]
+    age_values: List[float] = []
+    for r in rows:
+        ts = _safe_float(r["age_ts"], 0.0)
+        if ts > 0:
+            age_values.append(max(0.0, now_ts - ts))
+    out["pending_oldest_age_sec"] = int(max(age_values) if age_values else 0)
 
     for row in rows:
         symbol = str(row["symbol"] or "").strip()
@@ -497,12 +549,15 @@ async def _cancel_unmatched_live_entries(
     open_orders_by_account: Dict[str, List[Dict[str, Any]]] = {}
     states_by_account: Dict[str, Dict[str, Any]] = {}
     known = _known_order_ids(conn)
+    seen_live_oids: Set[str] = set()
 
     for acct in accounts:
         try:
             orders = _fetch_open_orders(
                 info_url,
                 acct.user,
+                dex=acct.dex,
+                use_frontend_orders=acct.use_frontend_orders,
                 fallback_info_url=fallback_info_url,
             )
         except Exception as exc:
@@ -515,6 +570,7 @@ async def _cancel_unmatched_live_entries(
             states_by_account[acct.label] = _fetch_clearinghouse_state(
                 info_url,
                 acct.user,
+                dex=acct.dex,
                 fallback_info_url=fallback_info_url,
             )
         except Exception:
@@ -525,6 +581,9 @@ async def _cancel_unmatched_live_entries(
             oid = str(order.get("oid") or "").strip()
             if not oid:
                 continue
+            if oid in seen_live_oids:
+                continue
+            seen_live_oids.add(oid)
             if oid in known:
                 continue
             if bool(order.get("reduceOnly")):
@@ -538,7 +597,7 @@ async def _cancel_unmatched_live_entries(
                 continue
 
             symbol_candidates = [coin]
-            if ":" not in coin and acct.label == "wallet":
+            if ":" not in coin and acct.adapter_key == "wallet":
                 symbol_candidates.extend([f"xyz:{coin}", f"cash:{coin}"])
 
             cancelled = False

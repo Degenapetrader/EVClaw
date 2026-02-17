@@ -7,6 +7,9 @@ import pytest
 from hourly_ops import (
     _append_position_audit_warnings,
     _audit_positions,
+    _build_accounts,
+    _fetch_clearinghouse_state,
+    _fetch_open_orders,
     _is_builder_symbol,
     _is_openish_status,
     _needs_self_heal,
@@ -93,6 +96,66 @@ def test_parse_json_obj_resilient():
     assert _parse_json_obj('{"ok": true}') == {"ok": True}
     noisy = "log line\n{\"ok\": false, \"errors\": [\"x\"]}\n"
     assert _parse_json_obj(noisy) == {"ok": False, "errors": ["x"]}
+
+
+def test_fetch_open_orders_builder_uses_frontend_with_dex(monkeypatch):
+    calls = []
+
+    def _fake_post(url, payload, timeout=8.0, fallback_info_url="https://api.hyperliquid.xyz/info"):
+        calls.append((url, payload, fallback_info_url))
+        return []
+
+    monkeypatch.setattr("hourly_ops._post_info", _fake_post)
+    rows = _fetch_open_orders(
+        "https://node2.evplus.ai/evclaw/info",
+        "0xabc",
+        dex="xyz",
+        use_frontend_orders=True,
+        fallback_info_url="https://api.hyperliquid.xyz/info",
+    )
+    assert rows == []
+    assert calls == [
+        (
+            "https://node2.evplus.ai/evclaw/info",
+            {"type": "frontendOpenOrders", "user": "0xabc", "dex": "xyz"},
+            "https://api.hyperliquid.xyz/info",
+        )
+    ]
+
+
+def test_fetch_clearinghouse_state_builder_uses_dex(monkeypatch):
+    calls = []
+
+    def _fake_post(url, payload, timeout=8.0, fallback_info_url="https://api.hyperliquid.xyz/info"):
+        calls.append((url, payload, fallback_info_url))
+        return {"assetPositions": []}
+
+    monkeypatch.setattr("hourly_ops._post_info", _fake_post)
+    state = _fetch_clearinghouse_state(
+        "https://node2.evplus.ai/evclaw/info",
+        "0xabc",
+        dex="xyz",
+        fallback_info_url="https://api.hyperliquid.xyz/info",
+    )
+    assert state == {"assetPositions": []}
+    assert calls == [
+        (
+            "https://node2.evplus.ai/evclaw/info",
+            {"type": "clearinghouseState", "user": "0xabc", "dex": "xyz"},
+            "https://api.hyperliquid.xyz/info",
+        )
+    ]
+
+
+def test_build_accounts_includes_perps_and_builder():
+    adapters = {"wallet": object()}
+    accounts = _build_accounts({"HYPERLIQUID_ADDRESS": "0xwallet"}, adapters)
+    labels = [a.label for a in accounts]
+    assert labels == ["wallet_perps", "wallet_builder_xyz"]
+    assert accounts[0].dex == ""
+    assert accounts[0].use_frontend_orders is False
+    assert accounts[1].dex == "xyz"
+    assert accounts[1].use_frontend_orders is True
 
 
 @pytest.mark.asyncio
