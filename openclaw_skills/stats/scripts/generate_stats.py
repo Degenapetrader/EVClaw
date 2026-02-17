@@ -29,7 +29,21 @@ from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
 
 SCRIPT_PATH = Path(__file__).resolve()
-EVCLAW_ROOT = Path(os.getenv("EVCLAW_ROOT") or SCRIPT_PATH.parents[3])
+# Find EVClaw root by walking up to find .env or ai_trader.db
+def _find_evclaw_root(start_path: Path) -> Path:
+    """Find EVClaw root directory by searching for .env or ai_trader.db."""
+    current = start_path
+    for _ in range(10):  # Max 10 levels up
+        if (current / ".env").exists() or (current / "ai_trader.db").exists():
+            return current
+        parent = current.parent
+        if parent == current:  # Reached root
+            break
+        current = parent
+    # Fallback to known path
+    return Path("/root/.openclaw/workspace-router/job_company_starter/EVClaw")
+
+EVCLAW_ROOT = _find_evclaw_root(SCRIPT_PATH)
 TRADE_SCRIPTS_DIR = EVCLAW_ROOT / "openclaw_skills" / "trade" / "scripts"
 HL_INFO_URL = "https://api.hyperliquid.xyz/info"
 DB_PATH_DEFAULT = str(Path(os.getenv("EVCLAW_DB_PATH") or (EVCLAW_ROOT / "ai_trader.db")))
