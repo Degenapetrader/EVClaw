@@ -7,6 +7,10 @@ EVClaw is an autonomous AGI trading skill for Hyperliquid:
 
 It is designed to run on a fresh Linux VPS with no dependency on your private local file layout.
 
+AI/operator runtime contract:
+- `AGENTS.md` is the canonical context map for this repo.
+- Scheduled cron prompts read only `CRON_CONTEXT` in `AGENTS.md` (not `MANUAL_COMMANDS`).
+
 ## What EVClaw does
 
 - Ingests market/tracker data from internet endpoints.
@@ -187,6 +191,10 @@ After bootstrap, these user-facing helper skills are available:
 - `/best3`
 - `/hedge`
 - `/stats`
+
+Operator note:
+- This section is manual/interactive guidance.
+- Scheduled cron jobs must use `AGENTS.md` `CRON_CONTEXT` only.
 
 ## Operations and health
 

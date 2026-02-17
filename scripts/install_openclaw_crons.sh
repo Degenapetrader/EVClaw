@@ -28,6 +28,7 @@ DB_PATH="${EVCLAW_DB_PATH:-$ROOT_DIR/ai_trader.db}"
 RUNTIME_DIR="${EVCLAW_RUNTIME_DIR:-$ROOT_DIR/state}"
 REPORT_PATH="${EVCLAW_HOURLY_REPORT_PATH:-$RUNTIME_DIR/hourly_ops_report.json}"
 SUMMARY_PATH="${EVCLAW_HOURLY_SUMMARY_PATH:-$RUNTIME_DIR/hourly_ops_summary.txt}"
+AGENTS_PATH="$ROOT_DIR/AGENTS.md"
 
 JOB_NAME="EVClaw AGI Trader Hourly (deterministic)"
 REPORT_JOB_NAME="EVClaw AGI Trader Hourly Report (system-event)"
@@ -51,10 +52,12 @@ Workdir: $ROOT_DIR
 DB: $DB_PATH
 
 Run:
+0) Read ONLY AGENTS cron context block in $AGENTS_PATH (between CRON_CONTEXT_START and CRON_CONTEXT_END). Ignore MANUAL_COMMANDS section.
 1) cd $ROOT_DIR && $EVCLAW_PYTHON hourly_ops.py --db $DB_PATH --json-out $REPORT_PATH --summary-out $SUMMARY_PATH
 2) Read and return ONLY summary lines from $SUMMARY_PATH (max 4 lines).
 3) If runner exits non-zero, report failure and include top error from $REPORT_PATH.
-4) Do not request, print, or modify secret keys. Runtime auth uses HYPERLIQUID_AGENT_PRIVATE_KEY (agent signer key for HYPERLIQUID_ADDRESS).
+4) Do NOT run user-interactive commands (/trade, /execute, /best3, /hedge) in scheduled jobs.
+5) Do not request, print, or modify secret keys. Runtime auth uses HYPERLIQUID_AGENT_PRIVATE_KEY (agent signer key for HYPERLIQUID_ADDRESS).
 MSG
 )"
 
@@ -67,9 +70,11 @@ Report: $REPORT_PATH
 Summary: $SUMMARY_PATH
 
 Read report + summary and post a compact operational check:
+0) Read ONLY AGENTS cron context block in $AGENTS_PATH (between CRON_CONTEXT_START and CRON_CONTEXT_END). Ignore MANUAL_COMMANDS section.
 1) Confirm latest deterministic run freshness and status.
 2) Confirm key counters (open_trades, pending_limit_cancels, unprotected_perps, unprotected_builder, protection_unknown).
 3) Highlight any WARN/CRIT conditions and required operator actions.
+4) Do NOT run user-interactive commands (/trade, /execute, /best3, /hedge) in scheduled jobs.
 MSG
 )"
 

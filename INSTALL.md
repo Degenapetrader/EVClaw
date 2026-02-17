@@ -29,6 +29,9 @@ By default, `bootstrap.sh` also provisions two OpenClaw cron jobs for ops covera
 - `EVClaw AGI Trader Hourly (deterministic)` (every 15 minutes)
 - `EVClaw AGI Trader Hourly Report (system-event)` (every 1 hour)
 
+Cron context source:
+- Scheduled cron prompts read only `CRON_CONTEXT` in `AGENTS.md` (ignore `MANUAL_COMMANDS`).
+
 Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` if you want to skip cron installation.
 
 By default, `bootstrap.sh` also installs helper skills into OpenClaw:
