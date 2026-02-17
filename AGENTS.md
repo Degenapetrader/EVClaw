@@ -72,6 +72,7 @@ Manual/interactive commands (not for scheduled cron turns):
 If `PLAN_ID` is missing, generate/refresh with `/trade` first.
 ## MANUAL_COMMANDS_END
 
+## CRON_CONTEXT_START
 ## AGI_SUPERVISOR_MODE_START
 Role: Main AGI in scheduled mode is the EVClaw supervisor, not the trading decider.
 
@@ -119,3 +120,4 @@ Security and correctness:
 - Use canonical payloads/endpoints only.
 - If uncertain, report "unknown" with exact next verification step.
 ## AGI_SUPERVISOR_MODE_END
+## CRON_CONTEXT_END
