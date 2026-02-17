@@ -372,10 +372,8 @@ class EntryGateConfig:
                 (_compat_env_str("EVCLAW_HIP3_LLM_GATE_AGENT_ID", "evclaw-hip3-entry-gate") or "").strip()
                 or (_compat_env_str("EVCLAW_LLM_GATE_AGENT_ID", "evclaw-entry-gate") or "").strip()
             )
-            model = (
-                _compat_env_str("EVCLAW_HIP3_LLM_GATE_MODEL", "openai-codex/gpt-5.2")
-                or "openai-codex/gpt-5.2"
-            ).strip() or None
+            # Model is controlled by OpenClaw agent config (single source of truth).
+            model = None
             thinking = (
                 _compat_env_str("EVCLAW_HIP3_LLM_GATE_THINKING", "medium")
                 or "medium"
@@ -385,10 +383,8 @@ class EntryGateConfig:
             agent_id = _normalize_agent_id(
                 _compat_env_str("EVCLAW_LLM_GATE_AGENT_ID", "evclaw-entry-gate")
             )
-            model = (
-                _compat_env_str(f"{env_prefix}MODEL", "openai-codex/gpt-5.2")
-                or "openai-codex/gpt-5.2"
-            ).strip() or None
+            # Model is controlled by OpenClaw agent config (single source of truth).
+            model = None
             thinking = (
                 _compat_env_str(f"{env_prefix}THINKING", "medium")
                 or "medium"
@@ -417,7 +413,6 @@ _ENTRY_GATE_CFG_KEYS_COMMON = (
 )
 _ENTRY_GATE_CFG_KEYS_NORMAL = (
     "EVCLAW_LLM_GATE_AGENT_ID",
-    "EVCLAW_LLM_GATE_MODEL",
     "EVCLAW_LLM_GATE_THINKING",
     "EVCLAW_LLM_GATE_TIMEOUT_SEC",
     "EVCLAW_LLM_GATE_MAX_KEEP",
@@ -425,7 +420,6 @@ _ENTRY_GATE_CFG_KEYS_NORMAL = (
 )
 _ENTRY_GATE_CFG_KEYS_HIP3 = (
     "EVCLAW_HIP3_LLM_GATE_AGENT_ID",
-    "EVCLAW_HIP3_LLM_GATE_MODEL",
     "EVCLAW_HIP3_LLM_GATE_THINKING",
     "EVCLAW_HIP3_LLM_GATE_TIMEOUT_SEC",
     "EVCLAW_HIP3_LLM_GATE_MAX_KEEP",

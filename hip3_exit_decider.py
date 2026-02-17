@@ -34,10 +34,6 @@ def _hip3_runtime_overrides() -> dict:
         or (env_str("EVCLAW_EXIT_DECIDER_AGENT_ID", "evclaw-exit-decider") or "").strip()
         or "evclaw-hip3-exit-decider"
     )
-    hip3_model_raw = (env_str("EVCLAW_HIP3_EXIT_DECIDER_MODEL", "") or "").strip()
-    if hip3_model_raw.lower() in {"default", "openclaw-default"}:
-        hip3_model_raw = ""
-    hip3_model = hip3_model_raw or None
     hip3_thinking = (
         env_str("EVCLAW_HIP3_EXIT_DECIDER_THINKING", "")
         or "medium"
@@ -47,7 +43,7 @@ def _hip3_runtime_overrides() -> dict:
         "symbol_prefixes": ("XYZ:",),
         "allowed_venues": ("hyperliquid",),
         "agent_id": hip3_agent_id,
-        "model": hip3_model,
+        "model": None,
         "thinking": hip3_thinking,
         "state_path": str(Path(EVCLAW_MEMORY_DIR) / "hip3_exit_decider_state.json"),
         "lock_path": str(Path(EVCLAW_MEMORY_DIR) / "hip3_exit_decider.lock"),

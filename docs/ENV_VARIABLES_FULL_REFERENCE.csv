@@ -18,14 +18,10 @@ EVCLAW_TRACKER_SYMBOL_URL_TEMPLATE,${EVCLAW_TRACKER_BASE_URL}/api/symbols/{symbo
 EVCLAW_ENABLED_VENUES,"hyperliquid,hip3",no,Enabled execution venues
 EVCLAW_DEFAULT_VENUE_PERPS,hyperliquid,no,Default venue for perp symbols
 EVCLAW_DEFAULT_VENUE_HIP3,hip3,no,Default venue for HIP3 symbols
-EVCLAW_LLM_GATE_MODEL,,no,Entry gate model override
 EVCLAW_LLM_GATE_THINKING,high,no,Entry gate reasoning level
 EVCLAW_LLM_GATE_TIMEOUT_SEC,120,no,Entry gate timeout
 EVCLAW_LLM_GATE_MAX_KEEP,4,no,Entry gate max selected candidates
-EVCLAW_HIP3_LLM_GATE_MODEL,,no,HIP3 entry gate model override
-EVCLAW_EXIT_DECIDER_MODEL,openai-codex/gpt-5.2,no,Exit decider model
 EVCLAW_EXIT_DECIDER_THINKING,high,no,Exit decider reasoning level
-EVCLAW_HIP3_EXIT_DECIDER_MODEL,,no,HIP3 exit decider model
 LIGHTER_BASE_URL,https://mainnet.zklighter.elliot.ai,no,Lighter API base URL
 LIGHTER_ACCOUNT_INDEX,,no,Lighter account index
 LIGHTER_API_KEY_PRIVATE_KEY,,no,Lighter API private key

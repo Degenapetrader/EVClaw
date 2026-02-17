@@ -41,14 +41,10 @@ Legacy aliases are intentionally removed in this clean-slate OSS package.
 
 | Key | Default | Required | Purpose |
 |---|---|---|---|
-| `EVCLAW_LLM_GATE_MODEL` | `""` | No | Entry gate model override. |
 | `EVCLAW_LLM_GATE_THINKING` | `medium` | No | Entry gate reasoning level. |
 | `EVCLAW_LLM_GATE_TIMEOUT_SEC` | `120` | No | Entry gate timeout. |
 | `EVCLAW_LLM_GATE_MAX_KEEP` | `4` | No | Entry gate max selected candidates. |
-| `EVCLAW_HIP3_LLM_GATE_MODEL` | `""` | No | HIP3 entry gate model override. |
-| `EVCLAW_EXIT_DECIDER_MODEL` | `openai-codex/gpt-5.2` | No | Exit decider model. |
 | `EVCLAW_EXIT_DECIDER_THINKING` | `medium` | No | Exit decider reasoning level. |
-| `EVCLAW_HIP3_EXIT_DECIDER_MODEL` | `""` | No | HIP3 exit decider model. |
 
 ## Optional Integrations
 

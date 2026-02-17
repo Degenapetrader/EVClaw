@@ -326,19 +326,13 @@ async def generate_cycle_candidates_file(
                     or env_str("EVCLAW_LLM_GATE_AGENT_ID", "evclaw-entry-gate")
                     or "evclaw-hip3-entry-gate"
                 ).strip() or "evclaw-hip3-entry-gate"
-                mode_model = (
-                    env_str("EVCLAW_HIP3_LLM_GATE_MODEL", "")
-                    or "openai-codex/gpt-5.2"
-                ).strip() or None
+                mode_model = None
             else:
                 mode_agent_id = (
                     env_str("EVCLAW_LLM_GATE_AGENT_ID", "evclaw-entry-gate")
                     or "evclaw-entry-gate"
                 ).strip() or "evclaw-entry-gate"
-                mode_model = (
-                    env_str("EVCLAW_LLM_GATE_MODEL", "")
-                    or "openai-codex/gpt-5.2"
-                ).strip() or None
+                mode_model = None
 
             subgate_payloads[gate_mode] = {
                 "enabled": mode_enabled,

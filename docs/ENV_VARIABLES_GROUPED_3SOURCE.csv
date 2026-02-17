@@ -16,9 +16,6 @@ runtime,EVCLAW_SIGNALS_DIR,./signals,no,Signals output directory
 venues,EVCLAW_ENABLED_VENUES,"hyperliquid,hip3",no,Enabled venues
 venues,EVCLAW_DEFAULT_VENUE_PERPS,hyperliquid,no,Default venue for perps
 venues,EVCLAW_DEFAULT_VENUE_HIP3,hip3,no,Default venue for HIP3 symbols
-llm,EVCLAW_LLM_GATE_MODEL,,no,Entry gate model override
-llm,EVCLAW_EXIT_DECIDER_MODEL,openai-codex/gpt-5.2,no,Exit decider model
-llm,EVCLAW_HIP3_EXIT_DECIDER_MODEL,,no,HIP3 exit decider model
 lighter,LIGHTER_BASE_URL,https://mainnet.zklighter.elliot.ai,no,Optional Lighter endpoint
 lighter,LIGHTER_ACCOUNT_INDEX,,no,Optional Lighter account index
 lighter,LIGHTER_API_KEY_PRIVATE_KEY,,no,Optional Lighter private key

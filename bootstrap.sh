@@ -168,10 +168,10 @@ ensure_openclaw_isolated_agents() {
   fi
 
   local specs=(
-    "${EVCLAW_LLM_GATE_AGENT_ID:-evclaw-entry-gate}|${EVCLAW_LLM_GATE_MODEL:-}"
-    "${EVCLAW_HIP3_LLM_GATE_AGENT_ID:-evclaw-hip3-entry-gate}|${EVCLAW_HIP3_LLM_GATE_MODEL:-}"
-    "${EVCLAW_EXIT_DECIDER_AGENT_ID:-evclaw-exit-decider}|${EVCLAW_EXIT_DECIDER_MODEL:-}"
-    "${EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID:-evclaw-hip3-exit-decider}|${EVCLAW_HIP3_EXIT_DECIDER_MODEL:-}"
+    "${EVCLAW_LLM_GATE_AGENT_ID:-evclaw-entry-gate}|"
+    "${EVCLAW_HIP3_LLM_GATE_AGENT_ID:-evclaw-hip3-entry-gate}|"
+    "${EVCLAW_EXIT_DECIDER_AGENT_ID:-evclaw-exit-decider}|"
+    "${EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID:-evclaw-hip3-exit-decider}|"
     "${EVCLAW_LEARNING_REFLECTOR_AGENT_ID:-evclaw-learning-reflector}|"
   )
 

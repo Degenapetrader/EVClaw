@@ -738,13 +738,8 @@ def _load_runtime_config(
         if thinking_raw in {"off", "minimal", "low", "medium", "high"}
         else EXIT_DECIDER_THINKING_DEFAULT
     )
-    model_raw = runtime_overrides.get("model")
-    if model_raw is None:
-        model_raw = _shared_env_str("EVCLAW_EXIT_DECIDER_MODEL")
-    model_txt = str(model_raw or "").strip()
-    if model_txt.lower() in {"default", "openclaw-default"}:
-        model_txt = ""
-    model: Optional[str] = model_txt or EXIT_DECIDER_MODEL_DEFAULT
+    # Model is controlled by OpenClaw agent config (single source of truth).
+    model: Optional[str] = EXIT_DECIDER_MODEL_DEFAULT
     timeout_sec = EXIT_DECIDER_TIMEOUT_SEC
     close_timeout_sec = max(1.0, EXIT_DECIDER_CLOSE_TIMEOUT_SEC)
     poll_sec = _env_float("EVCLAW_EXIT_DECIDER_POLL_SEC", float(exit_cfg.get("poll_sec") or 10.0))

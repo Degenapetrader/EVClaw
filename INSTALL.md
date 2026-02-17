@@ -150,7 +150,7 @@ tmux capture-pane -pt evclaw-live-agent -S -80 | tail -n 40
 ## Troubleshooting
 - `openclaw` errors:
   - Ensure `openclaw` is installed and authenticated.
-  - Verify agent model names in `.env` (`EVCLAW_*_MODEL`).
+  - Verify agent model routing in `~/.openclaw/openclaw.json` (`agents.list[].model` / `agents.defaults.model`).
 - Missing required env vars:
   - Set `HYPERLIQUID_ADDRESS` (main wallet address) and `HYPERLIQUID_AGENT_PRIVATE_KEY` (delegated signer key) in `.env`.
   - Remove legacy `HYPERLIQUID_API` if present.
