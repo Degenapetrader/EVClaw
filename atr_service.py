@@ -329,8 +329,12 @@ class ATRService:
 
         Order:
         1) cache
-        2) Binance futures
-        3) Hyperliquid candleSnapshot
+        2) primary source by symbol class
+           - xyz:* (HIP3): Hyperliquid candleSnapshot
+           - perps: Binance futures
+        3) fallback source
+           - xyz:*: Massive (optional, if configured)
+           - perps: Hyperliquid candleSnapshot
         """
         symbol = str(symbol).strip()
         if not symbol:
@@ -345,8 +349,23 @@ class ATRService:
             if cached:
                 return cached
 
-            # HIP3 / non-crypto symbols: prefer Massive (stocks OHLC).
+            # HIP3 / non-crypto symbols: prefer Hyperliquid candleSnapshot.
             if ":" in symbol:
+                result = await self._try_hyperliquid(symbol, interval=interval, period=period, price=price)
+                if result:
+                    self._set_cached(
+                        symbol=symbol,
+                        interval=interval,
+                        period=period,
+                        source=result.source,
+                        atr=result.atr,
+                        atr_pct=result.atr_pct,
+                        close=result.close,
+                        status="OK",
+                    )
+                    return result
+
+                # Optional fallback for HIP3 if Massive is configured.
                 result = await self._try_massive(symbol, interval=interval, period=period, price=price)
                 if result:
                     self._set_cached(
@@ -392,8 +411,7 @@ class ATRService:
                 return result
 
             # Cache negative outcome to avoid tight loops.
-            # NOTE: For HIP3 symbols (xyz:*), the primary source is Massive.
-            src = "massive" if ":" in symbol else "binance"
+            src = "hyperliquid" if ":" in symbol else "binance"
             self._set_cached(
                 symbol=symbol,
                 interval=interval,
@@ -856,6 +874,9 @@ class ATRService:
 
         # Request <= ~60 candles to avoid extra candleSnapshot weight scaling.
         hours = max(40, period * 3)  # 42 for period=14
+        # If we filter HIP3 candles to regular US trading hours, widen lookback.
+        if HIP3_ATR_RTH_ONLY and ":" in symbol:
+            hours = max(hours, period * 24)
         now_ms = int(time.time() * 1000)
         start_ms = now_ms - int(hours * 3600 * 1000)
 
@@ -884,6 +905,22 @@ class ATRService:
                         await asyncio.sleep(0.25)
                         continue
                     candles = await resp.json()
+
+                    # HIP3 equities: optionally filter HL aggregates to US RTH.
+                    if HIP3_ATR_RTH_ONLY and ":" in symbol:
+                        try:
+                            multiplier, timespan = self._parse_interval_to_massive(interval)
+                            filtered = self._filter_massive_results_rth(
+                                candles if isinstance(candles, list) else [],
+                                multiplier=int(multiplier),
+                                timespan=str(timespan),
+                            )
+                            # Only apply filter if enough bars remain for ATR.
+                            if len(filtered) >= (int(period) + 2):
+                                candles = filtered
+                        except Exception:
+                            pass
+
                     atr, close = self._atr_from_hl_candles(candles, period=period)
                     if atr and atr > 0:
                         base = close or (float(price) if price else None)
