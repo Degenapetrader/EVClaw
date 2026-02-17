@@ -264,6 +264,31 @@ def _append_action(report: Dict[str, Any], msg: str) -> None:
     report["actions"].append(msg)
 
 
+def _needs_self_heal(audit: Dict[str, Any]) -> bool:
+    return bool(
+        audit.get("missing_in_db")
+        or audit.get("unprotected_builder")
+        or audit.get("unprotected_perps")
+    )
+
+
+def _append_position_audit_warnings(report: Dict[str, Any], audit: Dict[str, Any]) -> None:
+    if audit.get("missing_in_db"):
+        report["warnings"].append(f"missing_positions_in_db:{len(audit['missing_in_db'])}")
+    if audit.get("unprotected_builder"):
+        report["warnings"].append(
+            f"unprotected_builder_positions:{len(audit['unprotected_builder'])}"
+        )
+    if audit.get("unprotected_perps"):
+        report["warnings"].append(
+            f"unprotected_perps_positions:{len(audit['unprotected_perps'])}"
+        )
+    if audit.get("unknown_builder_protection"):
+        report["warnings"].append(
+            f"unknown_builder_protection:{len(audit['unknown_builder_protection'])}"
+        )
+
+
 def _enqueue_orphan(
     conn: sqlite3.Connection,
     *,
@@ -842,6 +867,69 @@ def _recent_closes(conn: sqlite3.Connection) -> Dict[str, Any]:
     return {"count": len(rows), "top": top}
 
 
+def _parse_json_obj(text: str) -> Dict[str, Any]:
+    s = (text or "").strip()
+    if not s:
+        return {}
+    try:
+        out = json.loads(s)
+        return out if isinstance(out, dict) else {}
+    except Exception:
+        start = s.find("{")
+        end = s.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                out = json.loads(s[start : end + 1])
+                return out if isinstance(out, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+
+def _run_self_heal(
+    db_path: Path,
+    *,
+    info_url: str,
+    public_info_url: str,
+    close_on_fail: bool = False,
+) -> Dict[str, Any]:
+    cmd = [
+        "python3",
+        "self_heal.py",
+        "--mode",
+        "fix",
+        "--scope",
+        "all",
+        "--db",
+        str(db_path),
+        "--info-url",
+        info_url,
+        "--public-info-url",
+        public_info_url,
+    ]
+    if close_on_fail:
+        cmd += ["--close-on-fail", "1"]
+
+    cp = _run(cmd, cwd=ROOT_DIR)
+    stdout = (cp.stdout or "").strip()
+    stderr = (cp.stderr or "").strip()
+    payload = _parse_json_obj(stdout)
+
+    out: Dict[str, Any] = {
+        "invoked": True,
+        "cmd": cmd,
+        "rc": int(cp.returncode),
+        "stdout_tail": stdout[-4000:],
+        "stderr_tail": stderr[-1200:],
+        "ok": bool(payload.get("ok")) if payload else False,
+        "actions": payload.get("actions") if isinstance(payload.get("actions"), list) else [],
+        "failures": payload.get("errors") if isinstance(payload.get("errors"), list) else [],
+        "summary_before": payload.get("summary_before") if isinstance(payload.get("summary_before"), dict) else {},
+        "summary_after": payload.get("summary_after") if isinstance(payload.get("summary_after"), dict) else {},
+    }
+    return out
+
+
 def _health_level(report: Dict[str, Any]) -> str:
     crit = 0
     warn = len(report["warnings"])
@@ -1019,28 +1107,62 @@ async def _run_hourly(args: argparse.Namespace) -> int:
             )
             report["checks"]["unmatched_live_entries"] = unmatched
 
-            audit = await _audit_positions(
+            audit_before = await _audit_positions(
                 conn,
                 open_orders_by_account=open_orders_by_account,
                 states_by_account=states_by_account,
                 adapters=adapters,
                 report=report,
             )
-            report["checks"]["position_audit"] = audit
-            if audit["missing_in_db"]:
-                report["warnings"].append(f"missing_positions_in_db:{len(audit['missing_in_db'])}")
-            if audit["unprotected_builder"]:
-                report["warnings"].append(
-                    f"unprotected_builder_positions:{len(audit['unprotected_builder'])}"
+            report["checks"]["position_audit_before"] = audit_before
+
+            self_heal = {
+                "invoked": False,
+                "cmd": [],
+                "rc": None,
+                "actions": [],
+                "failures": [],
+                "summary_before": {},
+                "summary_after": {},
+            }
+
+            audit_after = audit_before
+            if bool(args.apply_fixes) and _needs_self_heal(audit_before):
+                self_heal = _run_self_heal(
+                    db_path,
+                    info_url=info_url,
+                    public_info_url=public_info_url,
+                    close_on_fail=False,
                 )
-            if audit["unprotected_perps"]:
-                report["warnings"].append(
-                    f"unprotected_perps_positions:{len(audit['unprotected_perps'])}"
+                if int(self_heal.get("rc", 0)) != 0:
+                    report["warnings"].append(f"self_heal_nonzero_rc:{self_heal['rc']}")
+                if self_heal.get("failures"):
+                    report["warnings"].append(f"self_heal_failures:{len(self_heal['failures'])}")
+
+                # Refresh live truth and re-audit after self-heal.
+                _unmatched_post, open_orders_post, states_post = await _cancel_unmatched_live_entries(
+                    conn,
+                    info_url,
+                    public_info_url,
+                    accounts,
+                    adapters,
+                    apply_fixes=False,
+                    cancel_unmatched=False,
+                    report=report,
                 )
-            if audit["unknown_builder_protection"]:
-                report["warnings"].append(
-                    f"unknown_builder_protection:{len(audit['unknown_builder_protection'])}"
+                audit_after = await _audit_positions(
+                    conn,
+                    open_orders_by_account=open_orders_post,
+                    states_by_account=states_post,
+                    adapters=adapters,
+                    report=report,
                 )
+                _append_action(report, f"self_heal_invoked:rc={self_heal.get('rc')}")
+
+            report["checks"]["self_heal"] = self_heal
+            report["checks"]["position_audit_after"] = audit_after
+            report["checks"]["position_audit"] = audit_after
+            _append_position_audit_warnings(report, audit_after)
         finally:
             for adapter in adapters.values():
                 try:

@@ -1,6 +1,13 @@
 """Unit guards for builder detection + status normalization in hourly_ops."""
 
-from hourly_ops import _is_builder_symbol, _is_openish_status, _normalize_order_status
+from hourly_ops import (
+    _append_position_audit_warnings,
+    _is_builder_symbol,
+    _is_openish_status,
+    _needs_self_heal,
+    _normalize_order_status,
+    _parse_json_obj,
+)
 
 
 def _classify_builder_protection(sl_status, tp_status):
@@ -43,3 +50,41 @@ def test_builder_protection_contract():
     assert _classify_builder_protection("unknown", "open") == "unknown"
     assert _classify_builder_protection("canceled", "open") == "unprotected"
     assert _classify_builder_protection("open", "rejected") == "unprotected"
+
+
+def test_needs_self_heal_contract():
+    assert _needs_self_heal({"missing_in_db": ["BTC:LONG"]}) is True
+    assert _needs_self_heal({"unprotected_builder": ["XYZ:AMD"]}) is True
+    assert _needs_self_heal({"unprotected_perps": ["ETH"]}) is True
+    assert _needs_self_heal(
+        {
+            "missing_in_db": [],
+            "unprotected_builder": [],
+            "unprotected_perps": [],
+        }
+    ) is False
+
+
+def test_append_position_audit_warnings():
+    report = {"warnings": []}
+    _append_position_audit_warnings(
+        report,
+        {
+            "missing_in_db": ["BTC:LONG"],
+            "unprotected_builder": ["XYZ:AMD:trade_id=1"],
+            "unprotected_perps": ["ETH:trade_id=2"],
+            "unknown_builder_protection": ["XYZ:NFLX:trade_id=3"],
+        },
+    )
+    assert report["warnings"] == [
+        "missing_positions_in_db:1",
+        "unprotected_builder_positions:1",
+        "unprotected_perps_positions:1",
+        "unknown_builder_protection:1",
+    ]
+
+
+def test_parse_json_obj_resilient():
+    assert _parse_json_obj('{"ok": true}') == {"ok": True}
+    noisy = "log line\n{\"ok\": false, \"errors\": [\"x\"]}\n"
+    assert _parse_json_obj(noisy) == {"ok": False, "errors": ["x"]}
