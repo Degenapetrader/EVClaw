@@ -1331,7 +1331,7 @@ class CycleTrigger:
         tmp_context_file = f"{context_file}{temp_suffix}"
         tmp_context_json_file = f"{context_json_file}{temp_suffix}"
         cmd = [
-            "python3",
+            sys.executable,
             CONTEXT_BUILDER,
             "--cycle-file",
             data_file,

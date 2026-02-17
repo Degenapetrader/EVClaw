@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import sqlite3
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1878,7 +1879,7 @@ async def _run_cli_close(
     timeout_sec: float = 120.0,
 ) -> Tuple[bool, str]:
     cmd = [
-        "python3",
+        sys.executable,
         str(SKILL_DIR / "cli.py"),
         "positions",
         "--close",

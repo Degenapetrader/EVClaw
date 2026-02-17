@@ -27,6 +27,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -938,7 +939,7 @@ def _run_db_maintenance(db_path: Path, *, apply_fixes: bool) -> Dict[str, Any]:
         "backup_rc": None,
         "repair_attempted": False,
     }
-    check = _run(["python3", "db_maintenance.py", "--db", str(db_path), "--check"])
+    check = _run([sys.executable, "db_maintenance.py", "--db", str(db_path), "--check"])
     out["check_rc"] = int(check.returncode)
     out["check_stdout"] = (check.stdout or "").strip()
 
@@ -946,10 +947,10 @@ def _run_db_maintenance(db_path: Path, *, apply_fixes: bool) -> Dict[str, Any]:
     if out["check_rc"] != 0 and apply_fixes and utc_hour == 0:
         out["repair_attempted"] = True
         backup = _run(
-            ["python3", "db_maintenance.py", "--db", str(db_path), "--backup", "--keep", "14"]
+            [sys.executable, "db_maintenance.py", "--db", str(db_path), "--backup", "--keep", "14"]
         )
         repair = _run(
-            ["python3", "db_maintenance.py", "--db", str(db_path), "--repair", "--check"]
+            [sys.executable, "db_maintenance.py", "--db", str(db_path), "--repair", "--check"]
         )
         out["backup_rc"] = int(backup.returncode)
         out["repair_rc"] = int(repair.returncode)
@@ -1027,7 +1028,7 @@ def _run_self_heal(
     close_on_fail: bool = False,
 ) -> Dict[str, Any]:
     cmd = [
-        "python3",
+        sys.executable,
         "self_heal.py",
         "--mode",
         "fix",
@@ -1199,7 +1200,7 @@ async def _run_hourly(args: argparse.Namespace) -> int:
 
         # 4) sltp incident reconcile
         wallet = _env("HYPERLIQUID_ADDRESS", dotenv)
-        cmd = ["python3", "sltp_incident_reconciler.py", "--db", str(db_path)]
+        cmd = [sys.executable, "sltp_incident_reconciler.py", "--db", str(db_path)]
         if wallet:
             cmd += ["--wallet", wallet]
         cp = _run(cmd, cwd=ROOT_DIR)
