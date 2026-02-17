@@ -397,11 +397,11 @@ async def process_candidates_impl(
         except Exception as exc:
             fallback_total = 0.0
             if isinstance(snapshot, dict):
+                # EVClaw uses unified Hyperliquid account mode.
+                # Do not include hl_wallet_* in gross fallback because it can overlap hl_*.
                 for key in (
                     "hl_long_notional",
                     "hl_short_notional",
-                    "hl_wallet_long_notional",
-                    "hl_wallet_short_notional",
                     "lighter_long_notional",
                     "lighter_short_notional",
                 ):

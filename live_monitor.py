@@ -731,11 +731,10 @@ def print_snapshot(
         f"net_notional={format_money(hl_wallet_net_not)}"
     )
     print(
-        f"HIP3 wallet: equity={format_money(hip3_equity)} "
-        f"balance={format_money(hip3_balance)} "
-        f"unrealized={format_money(hip3_unrealized)} "
+        f"HIP3 slice:  unrealized={format_money(hip3_unrealized)} "
         f"L/S={hip3_long_count}/{hip3_short_count} "
-        f"net_notional={format_money(hip3_net_not)}"
+        f"net_notional={format_money(hip3_net_not)} "
+        f"(equity shares HL wallet unified total)"
     )
     print(
         f"Lighter:     equity={format_money(lighter_equity)} "
@@ -745,8 +744,12 @@ def print_snapshot(
         f"L/S={lighter_long_count}/{lighter_short_count} "
         f"net_notional={format_money(lt_net_not)}"
     )
+    # Unified account mode: hl_wallet_equity already includes wallet perps +
+    # builder dexes + free spot stables. Never add it to perps equity.
+    hl_unified_equity = max(float(total_equity or 0.0), float(hl_wallet_equity or 0.0))
     print(f"PERPS EQUITY (HL): {format_money(total_equity)}")
-    print(f"GRAND (HL + WALLET):    {format_money(total_equity + hl_wallet_equity)}")
+    print(f"HL UNIFIED TOTAL:  {format_money(hl_unified_equity)}")
+    print("NOTE: unified mode -> hl_wallet_equity/hip3_equity overlap perps; never add equity fields.")
     print(
         f"SLTP_FAILED={len(sltp_failed)} "
         f"PLACING_SLTP={len(placing_sltp)} "
@@ -757,8 +760,9 @@ def print_snapshot(
     if placing_sltp:
         print(f"  PLACING_SLTP symbols: {', '.join(sorted(placing_sltp))}")
     print()
-    print_positions("HIP3 positions:", hl_positions)
-    print_positions("HIP3 wallet positions:", hl_wallet_positions)
+    print_positions("Hyperliquid positions:", hl_positions)
+    if hl_wallet_positions:
+        print_positions("HL wallet adapter positions:", hl_wallet_positions)
     if lighter_positions:
         print()
         print_positions("Lighter positions:", lighter_positions)

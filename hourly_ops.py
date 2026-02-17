@@ -701,13 +701,19 @@ async def _audit_positions(
     exchange_positions: Dict[str, Dict[str, Any]] = {}
     exchange_open_positions_perps = 0
     exchange_open_positions_builder = 0
+    seen_perps: set[str] = set()
+    seen_builder: set[str] = set()
     for st in states_by_account.values():
         for raw_coin, pos in _extract_positions(st).items():
             coin = _symbol_to_coin(raw_coin)
             if ":" in str(raw_coin):
-                exchange_open_positions_builder += 1
+                if coin not in seen_builder:
+                    exchange_open_positions_builder += 1
+                    seen_builder.add(coin)
             else:
-                exchange_open_positions_perps += 1
+                if coin not in seen_perps:
+                    exchange_open_positions_perps += 1
+                    seen_perps.add(coin)
             exchange_positions[coin] = pos
 
     all_orders: List[Dict[str, Any]] = []
@@ -873,9 +879,12 @@ async def _audit_positions(
     unprotected = list(unprotected_perps) + list(unprotected_builder)
 
     total_equity = 0.0
-    for st in states_by_account.values():
+    equity_components: Dict[str, float] = {}
+    for label, st in states_by_account.items():
         ms = st.get("marginSummary", {}) if isinstance(st, dict) else {}
-        total_equity += _safe_float(ms.get("accountValue"), 0.0)
+        eq = _safe_float(ms.get("accountValue"), 0.0)
+        total_equity += eq
+        equity_components[label] = eq
 
     return {
         "exchange_open_positions": len(exchange_positions),
@@ -888,6 +897,8 @@ async def _audit_positions(
         "coverage_gaps": coverage_gaps,
         "unprotected": unprotected,
         "equity_total": total_equity,
+        "equity_components": equity_components,
+        "equity_note": "equity_total is account-slice sum; avoid adding monitor_snapshot hl/hip3 equity fields on top.",
     }
 
 

@@ -546,6 +546,15 @@ def build_context(db_path: str, runtime_dir: str, symbol: str) -> Dict[str, Any]
     risk_usd = venue_eq * (risk_pct / 100.0) if venue_eq > 0 else 0.0
     recommended_size_usd = (risk_usd / (default_sl_pct / 100.0)) if risk_usd > 0 else None
 
+    hip3_eq = 0.0
+    try:
+        hip3_eq = float(snap.get("hip3_equity") or 0.0) if isinstance(snap, dict) else 0.0
+    except Exception:
+        hip3_eq = 0.0
+    # Unified account mode: hip3_equity already overlaps HL perps equity.
+    # Canonical total must be non-additive.
+    hl_unified_equity = max(float(venue_eq or 0.0), hip3_eq)
+
     return {
         "symbol": sym,
         "generated_at": ctx_payload.get("generated_at"),
@@ -559,7 +568,10 @@ def build_context(db_path: str, runtime_dir: str, symbol: str) -> Dict[str, Any]
             "hl_equity_live_ts_iso": (live_equity.get("ts_iso") if isinstance(live_equity, dict) else None),
             "hl_equity_source": venue_eq_source,
             "hip3_equity": snap.get("hip3_equity"),
-            "grand_equity": (float(venue_eq or 0) + float(snap.get("hip3_equity") or 0)) if snap else None,
+            "hl_unified_equity": hl_unified_equity if hl_unified_equity > 0 else None,
+            # Keep legacy key for compatibility, but make it non-additive.
+            "grand_equity": hl_unified_equity if hl_unified_equity > 0 else None,
+            "equity_note": "Unified account: hip3_equity overlaps hl_equity; do not add them.",
             "hl_net_notional": snap.get("hl_net_notional"),
             "hl_long_notional": snap.get("hl_long_notional"),
             "hl_short_notional": snap.get("hl_short_notional"),
