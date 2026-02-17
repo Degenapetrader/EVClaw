@@ -1,7 +1,12 @@
 """Unit guards for builder detection + status normalization in hourly_ops."""
 
+import sqlite3
+
+import pytest
+
 from hourly_ops import (
     _append_position_audit_warnings,
+    _audit_positions,
     _is_builder_symbol,
     _is_openish_status,
     _needs_self_heal,
@@ -88,3 +93,60 @@ def test_parse_json_obj_resilient():
     assert _parse_json_obj('{"ok": true}') == {"ok": True}
     noisy = "log line\n{\"ok\": false, \"errors\": [\"x\"]}\n"
     assert _parse_json_obj(noisy) == {"ok": False, "errors": ["x"]}
+
+
+@pytest.mark.asyncio
+async def test_audit_positions_reports_builder_coverage_gap():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE trades (
+          id INTEGER PRIMARY KEY,
+          symbol TEXT,
+          direction TEXT,
+          venue TEXT,
+          size REAL,
+          sl_order_id TEXT,
+          tp_order_id TEXT,
+          exit_time REAL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO trades (id, symbol, direction, venue, size, sl_order_id, tp_order_id, exit_time)
+        VALUES (1, 'XYZ:BABA', 'SHORT', 'hyperliquid_wallet', 30.838, NULL, NULL, NULL)
+        """
+    )
+
+    open_orders_by_account = {
+        "wallet": [
+            {"coin": "XYZ:BABA", "reduceOnly": True, "sz": "9.472", "oid": 123},
+        ]
+    }
+    states_by_account = {
+        "wallet": {
+            "marginSummary": {"accountValue": "100.0"},
+            "assetPositions": [{"position": {"coin": "XYZ:BABA", "szi": "-30.838"}}],
+        }
+    }
+
+    audit = await _audit_positions(
+        conn,
+        open_orders_by_account=open_orders_by_account,
+        states_by_account=states_by_account,
+        adapters={},
+        report={"warnings": []},
+    )
+
+    assert audit["exchange_open_positions"] == 1
+    assert audit["exchange_open_positions_perps"] == 0
+    assert audit["exchange_open_positions_builder"] == 1
+    assert len(audit["coverage_gaps"]) == 1
+    gap = audit["coverage_gaps"][0]
+    assert gap["bucket"] == "builder"
+    assert gap["symbol"] == "XYZ:BABA"
+    assert gap["expected_size"] == pytest.approx(30.838)
+    assert gap["protected_open_size"] == pytest.approx(9.472)
+    assert gap["gap_size"] == pytest.approx(21.366)

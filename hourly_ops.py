@@ -623,7 +623,7 @@ async def _audit_positions(
     placeholders = ",".join("?" for _ in venue_list)
     db_rows = conn.execute(
         f"""
-        SELECT id, symbol, direction, venue, sl_order_id, tp_order_id
+        SELECT id, symbol, direction, venue, size, sl_order_id, tp_order_id
         FROM trades
         WHERE exit_time IS NULL
           AND venue IN ({placeholders})
@@ -639,8 +639,16 @@ async def _audit_positions(
         db_by_coin.setdefault(coin, []).append(r)
 
     exchange_positions: Dict[str, Dict[str, Any]] = {}
+    exchange_open_positions_perps = 0
+    exchange_open_positions_builder = 0
     for st in states_by_account.values():
-        exchange_positions.update(_extract_positions(st))
+        for raw_coin, pos in _extract_positions(st).items():
+            coin = _symbol_to_coin(raw_coin)
+            if ":" in str(raw_coin):
+                exchange_open_positions_builder += 1
+            else:
+                exchange_open_positions_perps += 1
+            exchange_positions[coin] = pos
 
     all_orders: List[Dict[str, Any]] = []
     for orders in open_orders_by_account.values():
@@ -648,7 +656,7 @@ async def _audit_positions(
 
     orders_by_coin: Dict[str, List[Dict[str, Any]]] = {}
     for o in all_orders:
-        coin = str(o.get("coin") or "").strip().upper()
+        coin = _symbol_to_coin(str(o.get("coin") or ""))
         if not coin:
             continue
         orders_by_coin.setdefault(coin, []).append(o)
@@ -661,12 +669,27 @@ async def _audit_positions(
     unprotected_builder: List[str] = []
     unprotected_perps: List[str] = []
     unknown_builder_protection: List[str] = []
+    coverage_gaps: List[Dict[str, Any]] = []
+
+    def _coverage_gap_for_coin(coin_key: str, db_size_fallback: float) -> Tuple[float, float, float]:
+        pos = exchange_positions.get(coin_key) or {}
+        expected = _safe_float(pos.get("size"), 0.0)
+        if expected <= 0 and db_size_fallback > 0:
+            expected = float(db_size_fallback)
+        orders = orders_by_coin.get(coin_key, [])
+        protected_open = 0.0
+        for order in orders:
+            if bool(order.get("reduceOnly")):
+                protected_open += _safe_float(order.get("sz"), 0.0)
+        gap = max(0.0, expected - protected_open)
+        return expected, protected_open, gap
 
     for r in db_rows:
         trade_id = int(r["id"])
         symbol = str(r["symbol"] or "").strip().upper()
         venue = str(r["venue"] or "").strip().lower()
         coin = _symbol_to_coin(symbol)
+        db_size = _safe_float(r["size"], 0.0)
         sl = str(r["sl_order_id"] or "").strip()
         tp = str(r["tp_order_id"] or "").strip()
 
@@ -674,6 +697,18 @@ async def _audit_positions(
             if not sl or not tp:
                 unprotected_builder.append(
                     f"{symbol}:trade_id={trade_id}:reason=missing_sltp_oid"
+                )
+                expected, protected_open, gap = _coverage_gap_for_coin(coin, db_size)
+                coverage_gaps.append(
+                    {
+                        "bucket": "builder",
+                        "symbol": symbol,
+                        "trade_id": trade_id,
+                        "expected_size": expected,
+                        "protected_open_size": protected_open,
+                        "gap_size": gap,
+                        "reason": "missing_sltp_oid",
+                    }
                 )
                 continue
 
@@ -709,6 +744,18 @@ async def _audit_positions(
                 unprotected_builder.append(
                     f"{symbol}:trade_id={trade_id}:sl={sl_status}:tp={tp_status}"
                 )
+                expected, protected_open, gap = _coverage_gap_for_coin(coin, db_size)
+                coverage_gaps.append(
+                    {
+                        "bucket": "builder",
+                        "symbol": symbol,
+                        "trade_id": trade_id,
+                        "expected_size": expected,
+                        "protected_open_size": protected_open,
+                        "gap_size": gap,
+                        "reason": f"sl={sl_status}:tp={tp_status}",
+                    }
+                )
                 continue
 
             if sl_status == "unknown" or tp_status == "unknown":
@@ -725,6 +772,18 @@ async def _audit_positions(
             unprotected_builder.append(
                 f"{symbol}:trade_id={trade_id}:sl={sl_status}:tp={tp_status}"
             )
+            expected, protected_open, gap = _coverage_gap_for_coin(coin, db_size)
+            coverage_gaps.append(
+                {
+                    "bucket": "builder",
+                    "symbol": symbol,
+                    "trade_id": trade_id,
+                    "expected_size": expected,
+                    "protected_open_size": protected_open,
+                    "gap_size": gap,
+                    "reason": f"sl={sl_status}:tp={tp_status}",
+                }
+            )
             continue
 
         coin_orders = orders_by_coin.get(coin, [])
@@ -738,6 +797,18 @@ async def _audit_positions(
             unprotected_perps.append(
                 f"{symbol}:trade_id={trade_id}:open_reduce_only={reduce_only}"
             )
+            expected, protected_open, gap = _coverage_gap_for_coin(coin, db_size)
+            coverage_gaps.append(
+                {
+                    "bucket": "perps",
+                    "symbol": symbol,
+                    "trade_id": trade_id,
+                    "expected_size": expected,
+                    "protected_open_size": protected_open,
+                    "gap_size": gap,
+                    "reason": f"open_reduce_only={reduce_only}",
+                }
+            )
 
     unprotected = list(unprotected_perps) + list(unprotected_builder)
 
@@ -748,10 +819,13 @@ async def _audit_positions(
 
     return {
         "exchange_open_positions": len(exchange_positions),
+        "exchange_open_positions_perps": exchange_open_positions_perps,
+        "exchange_open_positions_builder": exchange_open_positions_builder,
         "missing_in_db": missing_in_db,
         "unprotected_builder": unprotected_builder,
         "unprotected_perps": unprotected_perps,
         "unknown_builder_protection": unknown_builder_protection,
+        "coverage_gaps": coverage_gaps,
         "unprotected": unprotected,
         "equity_total": total_equity,
     }
@@ -977,6 +1051,8 @@ def _write_outputs(report: Dict[str, Any], *, json_out: Path, summary_out: Path)
     line3 = (
         f"equity={_safe_float(audit.get('equity_total', 0.0)):.2f} "
         f"open_pos={int(audit.get('exchange_open_positions', 0))} "
+        f"open_pos_perps={int(audit.get('exchange_open_positions_perps', 0))} "
+        f"open_pos_builder={int(audit.get('exchange_open_positions_builder', 0))} "
         f"missing_in_db={len(audit.get('missing_in_db', []))} "
         f"unprot_builder={len(audit.get('unprotected_builder', []))} "
         f"unprot_perps={len(audit.get('unprotected_perps', []))} "
