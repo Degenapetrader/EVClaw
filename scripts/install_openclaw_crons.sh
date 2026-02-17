@@ -52,7 +52,7 @@ Workdir: $ROOT_DIR
 DB: $DB_PATH
 
 Run:
-0) Read ONLY AGENTS cron context block in $AGENTS_PATH (between CRON_CONTEXT_START and CRON_CONTEXT_END). Ignore MANUAL_COMMANDS section.
+0) Read ONLY AGENTS supervisor block in $AGENTS_PATH (between AGI_SUPERVISOR_MODE_START and AGI_SUPERVISOR_MODE_END). Ignore MANUAL_COMMANDS section.
 1) cd $ROOT_DIR && $EVCLAW_PYTHON hourly_ops.py --db $DB_PATH --json-out $REPORT_PATH --summary-out $SUMMARY_PATH
 2) Read and return ONLY summary lines from $SUMMARY_PATH (max 4 lines).
 3) If runner exits non-zero, report failure and include top error from $REPORT_PATH.
@@ -70,7 +70,7 @@ Report: $REPORT_PATH
 Summary: $SUMMARY_PATH
 
 Read report + summary and post a compact operational check:
-0) Read ONLY AGENTS cron context block in $AGENTS_PATH (between CRON_CONTEXT_START and CRON_CONTEXT_END). Ignore MANUAL_COMMANDS section.
+0) Read ONLY AGENTS supervisor block in $AGENTS_PATH (between AGI_SUPERVISOR_MODE_START and AGI_SUPERVISOR_MODE_END). Ignore MANUAL_COMMANDS section.
 1) Confirm latest deterministic run freshness and status.
 2) Confirm key counters (open_trades, pending_limit_cancels, unprotected_perps, unprotected_builder, protection_unknown).
 3) Highlight any WARN/CRIT conditions and required operator actions.

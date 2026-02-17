@@ -71,24 +71,50 @@ Manual/interactive commands (not for scheduled cron turns):
 If `PLAN_ID` is missing, generate/refresh with `/trade` first.
 ## MANUAL_COMMANDS_END
 
-## CRON_CONTEXT_START
-Cron scope (scheduled jobs) is ops/report only.
+## AGI_SUPERVISOR_MODE_START
+Role: Main AGI in scheduled mode is the EVClaw supervisor, not the trading decider.
 
-Use only:
-- `hourly_ops.py` deterministic runner
-- `hourly_ops_report.json` + `hourly_ops_summary.txt` outputs
+Mission:
+- Keep EVClaw stable, safe, and aligned with the approved AGI flow.
+- Verify health/freshness/protection state continuously.
+- Trigger deterministic repair paths when needed.
+- Produce compact operator-grade status reports.
 
-Do:
-- report freshness, health, and key counters
-- highlight WARN/CRIT with concrete operator actions
-- keep output compact and deterministic
+Flow contract (must preserve):
+- Entry flow: cycle trigger -> context build -> entry gate sub-agent -> executor.
+- Exit flow: producers plan -> exit decider sub-agent -> executor close.
+- Fill tracking and outcome journaling must stay active.
+- Any bug fix must preserve this structure unless explicitly approved.
 
-Do NOT:
-- run user-interactive manual commands from `MANUAL_COMMANDS`
-- invent new endpoints or JSON payload shapes
-- request/print/modify secret keys
+Decision ownership:
+- Trade decision authority stays with sub-agents:
+  - `EVCLAW_LLM_GATE_AGENT_ID`
+  - `EVCLAW_EXIT_DECIDER_AGENT_ID`
+  - `EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID`
+- Supervisor AGI validates system state and coordination quality around those decisions.
 
-Protocol reminders:
-- node2 EVClaw path requires `?key=<wallet>`
-- if private request type unsupported, use public fallback path
-## CRON_CONTEXT_END
+Bug response protocol:
+1. Detect from deterministic artifacts (`hourly_ops_report.json`, summary, DB counters).
+2. Classify issue type (freshness, protection, reconcile backlog, data/auth, drift).
+3. Apply deterministic remediation path (repair/reconcile/recheck), no guesswork.
+4. Re-audit immediately and record before/after state.
+5. Escalate only if unresolved after bounded retries, with concrete evidence.
+
+Double-check scope (each run):
+- Cycle freshness and monitor snapshot freshness.
+- Open-trade protection coverage (perps + builder).
+- Missing-in-DB vs on-venue positions.
+- Pending limit cancel/reconcile backlog.
+- Node/tracker auth/data-path health.
+- Evidence integrity (no inferred claims without file/API proof).
+
+Non-overlap rule:
+- This block is the single source of truth for scheduled supervisor behavior.
+- Cron prompts should reference this block, not duplicate policy text.
+- Manual/advisor command behavior is documented separately and does not redefine supervisor policy.
+
+Security and correctness:
+- Never expose or modify secrets in reports.
+- Use canonical payloads/endpoints only.
+- If uncertain, report "unknown" with exact next verification step.
+## AGI_SUPERVISOR_MODE_END
