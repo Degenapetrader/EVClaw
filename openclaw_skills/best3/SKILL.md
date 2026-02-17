@@ -13,7 +13,8 @@ Goal: when the user types `/best3`, pick the **best up to 3** current Hyperliqui
 Run:
 
 ```bash
-python3 scripts/generate_best3.py
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+python3 "$EVCLAW_ROOT/openclaw_skills/best3/scripts/generate_best3.py"
 ```
 
 Optional:

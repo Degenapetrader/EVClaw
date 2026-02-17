@@ -20,12 +20,13 @@ This uses an **LLM gate** (same idea as EVClaw entry gate) but restricted to the
 1) Generate + store plan(s) via the trade gate:
 
 ```bash
-python3 scripts/generate_plans.py <SYMBOL...> [--direction long|short] [--size-usd 5000]
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+python3 "$EVCLAW_ROOT/openclaw_skills/trade/scripts/generate_plans.py" <SYMBOL...> [--direction long|short] [--size-usd 5000]
 ```
 
 Examples:
-- Single symbol: `python3 .../generate_plans.py ETH`
-- Multi-symbol: `python3 .../generate_plans.py ETH BTC`
+- Single symbol: `EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" python3 "$EVCLAW_ROOT/openclaw_skills/trade/scripts/generate_plans.py" ETH`
+- Multi-symbol: `EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" python3 "$EVCLAW_ROOT/openclaw_skills/trade/scripts/generate_plans.py" ETH BTC`
 
 This script will:
 - allocate monotonic ids (e.g. `ETH-06`)

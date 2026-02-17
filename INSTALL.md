@@ -21,7 +21,8 @@ cp .env.example .env
 # Do not use your main wallet private key.
 # approve builder fee for your wallet: https://atsetup.evplus.ai/
 ./bootstrap.sh
-# Optional warm-start preview (dry-run): python3 scripts/import_learning_seed.py
+# Optional warm-start preview (dry-run):
+# EVCLAW_ROOT="${EVCLAW_ROOT:-$PWD}" python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 ./start.sh
 ```
 
@@ -30,7 +31,7 @@ By default, `bootstrap.sh` also provisions two OpenClaw cron jobs for ops covera
 - `EVClaw AGI Trader Hourly Report (system-event)` (every 1 hour)
 
 Cron context source:
-- Scheduled cron prompts read only `CRON_CONTEXT` in `AGENTS.md` (ignore `MANUAL_COMMANDS`).
+- Scheduled cron prompts read only `AGI_SUPERVISOR_MODE` in `AGENTS.md` (ignore `MANUAL_COMMANDS`).
 
 Set `EVCLAW_INSTALL_OPENCLAW_CRONS=0` if you want to skip cron installation.
 
@@ -69,23 +70,25 @@ Current official release seed note (v1, 2026-02-16):
 
 Import command:
 ```bash
-cd /path/to/evclaw
+EVCLAW_ROOT="/path/to/evclaw"
 # Dry-run (default): auto-downloads official release seed + verifies SHA256.
-python3 scripts/import_learning_seed.py
+python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 
 # Apply after explicit user approval.
-python3 scripts/import_learning_seed.py --apply
+python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py" --apply
 ```
 
 Dry-run preview:
 ```bash
-python3 scripts/import_learning_seed.py
+EVCLAW_ROOT="/path/to/evclaw"
+python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 ```
 
 Custom seed file (optional):
 ```bash
-python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz
-python3 scripts/import_learning_seed.py --seed /path/to/evclaw-learning-seed.tgz --apply
+EVCLAW_ROOT="/path/to/evclaw"
+python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py" --seed /path/to/evclaw-learning-seed.tgz
+python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py" --seed /path/to/evclaw-learning-seed.tgz --apply
 ```
 
 For OpenClaw agents:

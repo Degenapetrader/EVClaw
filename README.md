@@ -49,7 +49,8 @@ pip install -r requirements.txt
 cp .env.example .env
 # edit .env with your values
 ./bootstrap.sh
-# Optional warm-start preview (dry-run): python3 scripts/import_learning_seed.py
+# Optional warm-start preview (dry-run):
+# EVCLAW_ROOT="${EVCLAW_ROOT:-$PWD}" python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 ./start.sh
 ```
 
@@ -76,22 +77,17 @@ Use it only when the user explicitly agrees.
 Core learning state imports from `learning_state_kv` (`patterns`/`adjustments`), not a `pattern_stats` SQL table.
 `symbol_policy` rows are optional and may be empty depending on source history/release.
 
-Maintainer side (export from `hl-trader`):
-
-```bash
-cd /root/clawd/skills/hl-trader
-python3 scripts/export_learning_seed.py --out /tmp/evclaw-learning-seed.tgz
-```
+Seed publishing is maintainer-managed; end users only need the import flow below.
 
 User side (import into EVClaw from release):
 
 ```bash
-cd /path/to/EVClaw
+EVCLAW_ROOT="/path/to/EVClaw"
 # Dry-run (default): auto-downloads official release seed + verifies SHA256.
-python3 scripts/import_learning_seed.py
+python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 
 # Apply after explicit user approval.
-python3 scripts/import_learning_seed.py --apply
+python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py" --apply
 ```
 
 Current official release seed note (v1, 2026-02-16):

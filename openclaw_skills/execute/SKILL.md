@@ -23,7 +23,8 @@ This command executes a previously generated `/trade` plan.
 1) Run the executor script (deterministic):
 
 ```bash
-python3 ../trade/scripts/execute_plan.py <PLAN_ID> <chase|limit> [ttl]
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+python3 "$EVCLAW_ROOT/openclaw_skills/trade/scripts/execute_plan.py" <PLAN_ID> <chase|limit> [ttl]
 ```
 
 2) Reply with the result:

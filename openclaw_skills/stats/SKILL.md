@@ -14,7 +14,8 @@ Goal: one-shot snapshot of the user wallet.
 
 Run:
 ```bash
-python3 scripts/generate_stats.py
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+python3 "$EVCLAW_ROOT/openclaw_skills/stats/scripts/generate_stats.py"
 ```
 
 Options:

@@ -14,7 +14,8 @@ Default: **100% (neutralize)**. The user can choose a smaller hedge (e.g., 50%).
 ## Run
 
 ```bash
-python3 scripts/generate_hedge.py
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+python3 "$EVCLAW_ROOT/openclaw_skills/hedge/scripts/generate_hedge.py"
 ```
 
 Options:
