@@ -181,7 +181,8 @@ def _hl_info_targets(base_url: str) -> List[Tuple[str, Optional[Dict[str, str]]]
 
 
 def _resolve_hl_equity_address() -> Optional[str]:
-    # Prefer vault for perps equity; fall back to wallet.
+    # Unified account mode: HYPERLIQUID_ADDRESS is primary.
+    # VAULT_ADDRESS is legacy fallback for compatibility.
     for k in ("VAULT_ADDRESS", "HYPERLIQUID_ADDRESS", "HL_ADDRESS"):
         v = (os.getenv(k) or "").strip()
         if v:

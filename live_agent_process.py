@@ -359,7 +359,7 @@ async def process_candidates_impl(
 
         if hl_warn_threshold is not None and hl_net_notional is not None and abs(hl_net_notional) >= hl_warn_threshold:
             print(
-                f"Warning: Hyperliquid vault net exposure is high (net={hl_net_notional:.0f} vs "
+                f"Warning: Hyperliquid perps net exposure is high (net={hl_net_notional:.0f} vs "
                 f"threshold={hl_warn_threshold:.0f}; mult={net_exposure_warn_mult:.2f}x)."
             )
         if (
@@ -1108,7 +1108,7 @@ async def process_candidates_impl(
                 continue
 
             # Duplicate position check (venue-aware)
-            # We support Hyperliquid vault + HIP3 wallet holding the same symbol/direction in parallel (mirroring).
+            # We support Hyperliquid perps + HIP3 wallet holding the same symbol/direction in parallel (mirroring).
             # Only block a venue if that SAME venue already has the same-direction position.
             existing = await executor.get_all_positions()
             same_dir_venues = set()

@@ -246,7 +246,7 @@ class PendingLimitManager:
         if key in self._pending:
             return False
 
-        # Caps are enforced per-venue (equity pool differs between vault vs wallet).
+        # Caps are enforced per-venue (equity pool differs between perps vs wallet).
         venue_norm = str(venue or "").strip().lower()
         pending_same_venue = [p for p in self._pending.values() if str(p.venue).strip().lower() == venue_norm]
 

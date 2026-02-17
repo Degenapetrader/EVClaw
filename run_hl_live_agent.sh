@@ -10,7 +10,7 @@ if [[ ! -x "$EVCLAW_PYTHON" ]]; then
   EVCLAW_PYTHON="python3"
 fi
 
-# Always load env (vault/proxies/etc.)
+# Always load env (perps/proxies/etc.)
 set -a
 source .env
 set +a

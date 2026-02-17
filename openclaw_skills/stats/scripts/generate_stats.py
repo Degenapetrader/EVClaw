@@ -279,7 +279,7 @@ def main() -> int:
     live_err = None
     mids: Dict[str, float] = {}
 
-    # Live-first accounts: wallet + optional vault.
+    # Live-first accounts: wallet + optional legacy VAULT_ADDRESS account.
     vault = (os.getenv("VAULT_ADDRESS") or "").strip() or None
     if not vault:
         vault = _dotenv_get(DOTENV_PATH, "VAULT_ADDRESS")
@@ -371,7 +371,7 @@ def main() -> int:
     lines.append("Wallet stats")
     lines.append(f"- Wallet: {wallet[:6]}…{wallet[-4:]}")
     if vault and vault != wallet:
-        lines.append(f"- Vault: {vault[:6]}…{vault[-4:]}")
+        lines.append(f"- Perps account (legacy vault): {vault[:6]}…{vault[-4:]}")
 
     if equity is not None:
         lines.append(f"- Equity (HL, live): {_fmt_usd(float(equity))}")
@@ -382,7 +382,7 @@ def main() -> int:
         f"- Exposure (HL): net {_fmt_usd(net)} | long {_fmt_usd(long_notional)} | short {_fmt_usd(short_notional)}"
     )
 
-    # 24h account volume (live): sum(|px*sz|) from userFillsByTime for wallet + vault.
+    # 24h account volume (live): sum(|px*sz|) from userFillsByTime for wallet + legacy vault.
     vol24_usd = None
     try:
         end_ms = int(_utc_now() * 1000)

@@ -547,7 +547,7 @@ async def cmd_guardian(
         positions = await executor.get_all_positions()
 
         dust_notional = float(getattr(exec_config, "dust_notional_usd", 0.0) or 0.0)
-        # NOTE: duplicates must be venue-aware because we support Hyperliquid vault + HIP3 wallet
+        # NOTE: duplicates must be venue-aware because we support Hyperliquid perps + HIP3 wallet
         # running the same symbol/direction in parallel when mirroring is enabled.
         existing_same_dir = {
             (pos.symbol.upper(), pos.direction.upper(), normalize_venue(getattr(pos, 'venue', '') or ''))

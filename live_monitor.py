@@ -745,7 +745,7 @@ def print_snapshot(
         f"L/S={lighter_long_count}/{lighter_short_count} "
         f"net_notional={format_money(lt_net_not)}"
     )
-    print(f"VAULT EQUITY (HL ONLY): {format_money(total_equity)}")
+    print(f"PERPS EQUITY (HL): {format_money(total_equity)}")
     print(f"GRAND (HL + WALLET):    {format_money(total_equity + hl_wallet_equity)}")
     print(
         f"SLTP_FAILED={len(sltp_failed)} "
@@ -881,7 +881,7 @@ async def run_monitor(
             hip3_unrealized = sum_unrealized(hip3_positions)
             lighter_unrealized = sum_unrealized(lighter_positions)
 
-            # Perps equity from vault (or wallet if no vault)
+            # Perps equity from wallet (legacy VAULT_ADDRESS still supported).
             hl_equity = (
                 await get_hyperliquid_equity(hl, address=(hl._vault_address or hl._address), dex=None)
                 if hl is not None
@@ -947,7 +947,7 @@ async def run_monitor(
                     lighter, lighter_positions
                 )
 
-            # NOTE (2026-02-04): `total_equity` is HL (VAULT) ONLY.
+            # NOTE (2026-02-04): `total_equity` is HL (PERPS) ONLY.
             # HIP3 stays separate in `hip3_equity`. Lighter is ignored for now.
             total_equity = hl_equity
 
