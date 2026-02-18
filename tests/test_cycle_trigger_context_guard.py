@@ -215,6 +215,12 @@ def test_hip3_global_cooldown_suppression_does_not_poison_last_dir(monkeypatch) 
 
 def test_hip3_flip_prioritized_over_non_flip(monkeypatch) -> None:
     trigger = cycle_trigger.CycleTrigger(dry_run=False, verbose=False)
+    trigger._cfg = cycle_trigger.CycleConfig(
+        **{
+            **trigger._cfg.__dict__,
+            "hip3_max_emits_per_snapshot": 1,
+        }
+    )
     flip_symbol = "XYZ:AAA"
     other_symbol = "XYZ:BBB"
     trigger._current_symbols = {flip_symbol: {}, other_symbol: {}}
@@ -366,6 +372,12 @@ def test_cleanup_old_files_prunes_all_artifact_classes(monkeypatch, tmp_path) ->
         (tmp_mirror / f"evclaw_candidates_{seq}.json").write_text("{}", encoding="utf-8")
 
     trigger = cycle_trigger.CycleTrigger(dry_run=False, verbose=False)
+    trigger._cfg = cycle_trigger.CycleConfig(
+        **{
+            **trigger._cfg.__dict__,
+            "cycle_files_keep_n": 20,
+        }
+    )
     asyncio.run(trigger._cleanup_old_files(current_seq=29))
 
     assert len(list(runtime.glob("evclaw_cycle_*.json"))) == 20
