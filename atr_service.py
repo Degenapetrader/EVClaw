@@ -118,6 +118,22 @@ class ATRService:
         if self.db_path:
             self._init_db()
 
+    @staticmethod
+    def _normalize_symbol_for_atr(symbol: str) -> str:
+        """Canonicalize symbol casing for cache keys and HL API requests.
+
+        Hyperliquid candleSnapshot is case-sensitive for builder symbols:
+        - required: `xyz:HOOD`
+        - fails: `XYZ:HOOD`, `xyz:hood`
+        """
+        sym = str(symbol or "").strip()
+        if not sym:
+            return ""
+        if ":" not in sym:
+            return sym.upper()
+        prefix, base = sym.split(":", 1)
+        return f"{prefix.strip().lower()}:{base.strip().upper()}"
+
     async def initialize(self) -> None:
         if self._session and not self._session.closed:
             return
@@ -336,7 +352,7 @@ class ATRService:
            - xyz:*: Massive (optional, if configured)
            - perps: Hyperliquid candleSnapshot
         """
-        symbol = str(symbol).strip()
+        symbol = self._normalize_symbol_for_atr(symbol)
         if not symbol:
             return None
 
