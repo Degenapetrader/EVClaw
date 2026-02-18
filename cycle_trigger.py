@@ -257,6 +257,14 @@ HIP3_CACHE_MAX = env_int(
     "EVCLAW_HIP3_CACHE_MAX",
     2000,
 )
+HIP3_MAX_EMITS_PER_SNAPSHOT = env_int(
+    "EVCLAW_HIP3_MAX_EMITS_PER_SNAPSHOT",
+    3,
+)
+CYCLE_FILES_KEEP_N = env_int(
+    "EVCLAW_CYCLE_FILES_KEEP_N",
+    200,
+)
 HIP3_FLOW_SL_ATR_MULT = _skill_float(_HIP3_CFG, "flow_sl_atr_mult", 1.4)
 HIP3_FLOW_TP_ATR_MULT = _skill_float(_HIP3_CFG, "flow_tp_atr_mult", 2.0)
 HIP3_OFM_SL_ATR_MULT = _skill_float(_HIP3_CFG, "ofm_sl_atr_mult", 1.8)
@@ -292,8 +300,10 @@ class CycleConfig:
     hip3_trigger_global_cooldown_sec: float = HIP3_TRIGGER_GLOBAL_COOLDOWN_SEC
     hip3_trigger_symbol_cooldown_sec: float = HIP3_TRIGGER_SYMBOL_COOLDOWN_SEC
     hip3_trigger_ttl_sec: float = HIP3_TRIGGER_TTL_SEC
+    hip3_max_emits_per_snapshot: int = HIP3_MAX_EMITS_PER_SNAPSHOT
     hip3_cache_ttl_sec: float = HIP3_CACHE_TTL_SEC
     hip3_cache_max: int = HIP3_CACHE_MAX
+    cycle_files_keep_n: int = CYCLE_FILES_KEEP_N
     hip3_flow_ofm_stats_enabled: bool = HIP3_FLOW_OFM_STATS_ENABLED
     hip3_flow_ofm_stats_window_sec: float = HIP3_FLOW_OFM_STATS_WINDOW_SEC
     hip3_flow_ofm_stats_write_min_interval_sec: float = HIP3_FLOW_OFM_STATS_WRITE_MIN_INTERVAL_SEC
@@ -317,8 +327,10 @@ class CycleConfig:
             hip3_trigger_global_cooldown_sec=HIP3_TRIGGER_GLOBAL_COOLDOWN_SEC,
             hip3_trigger_symbol_cooldown_sec=HIP3_TRIGGER_SYMBOL_COOLDOWN_SEC,
             hip3_trigger_ttl_sec=HIP3_TRIGGER_TTL_SEC,
+            hip3_max_emits_per_snapshot=max(1, env_int("EVCLAW_HIP3_MAX_EMITS_PER_SNAPSHOT", HIP3_MAX_EMITS_PER_SNAPSHOT)),
             hip3_cache_ttl_sec=HIP3_CACHE_TTL_SEC,
             hip3_cache_max=env_int("EVCLAW_HIP3_CACHE_MAX", 2000),
+            cycle_files_keep_n=max(20, env_int("EVCLAW_CYCLE_FILES_KEEP_N", CYCLE_FILES_KEEP_N)),
             hip3_flow_ofm_stats_enabled=HIP3_FLOW_OFM_STATS_ENABLED,
             hip3_flow_ofm_stats_window_sec=HIP3_FLOW_OFM_STATS_WINDOW_SEC,
             hip3_flow_ofm_stats_write_min_interval_sec=HIP3_FLOW_OFM_STATS_WRITE_MIN_INTERVAL_SEC,
@@ -1189,56 +1201,69 @@ class CycleTrigger:
             return
 
         candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        flip_priority, z_score, symbol, direction, age_sec, hip3_main = candidates[0]
-        flip_detected = bool(flip_priority)
+        max_emits = max(1, int(self._cfg.hip3_max_emits_per_snapshot or 1))
 
         if (now - self._last_hip3_global_ts) < self._cfg.hip3_trigger_global_cooldown_sec:
+            top_flip_priority, top_z_score, top_symbol, top_direction, top_age_sec, _top_hip3_main = candidates[0]
             self.log.info(
                 "HIP3_TRIGGERED symbol=%s dir=%s z=%.3f age_sec=%.1f action=suppressed reason=global_cooldown",
+                top_symbol,
+                top_direction,
+                top_z_score,
+                top_age_sec,
+                )
+            return
+
+        emitted = 0
+        for flip_priority, z_score, symbol, direction, age_sec, hip3_main in candidates[:max_emits]:
+            flip_detected = bool(flip_priority)
+            cycle_seq = await self._reserve_cycle_seq()
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+            # For HIP3-triggered cycles, pre-generate a minimal candidates file so the
+            # live agent will actually attempt the HIP3 symbol (HIP3 symbols do not always
+            # rank into top_opportunities).
+            candidates_file = self._write_hip3_candidates_file(
+                cycle_seq=cycle_seq,
+                symbol=symbol,
+                direction=direction,
+                z_score=z_score,
+                hip3_main=hip3_main,
+            )
+
+            ok = await self._emit_cycle(
+                cycle_seq=cycle_seq,
+                sse_seq=int(sequence),
+                symbols=self._current_symbols,
+                timestamp_utc=timestamp,
+                source="hip3",
+                candidates_file=candidates_file,
+                hip3_symbol=symbol,
+                hip3_now_ts=now,
+            )
+            if not ok:
+                continue
+
+            emitted += 1
+            self._hip3_symbol_last_dir[symbol] = direction
+            self.log.info(
+                "HIP3_TRIGGERED symbol=%s dir=%s z=%.3f age_sec=%.1f action=emit reason=%s seq=%s",
                 symbol,
                 direction,
                 z_score,
                 age_sec,
-                )
-            return
+                "direction_flip" if flip_detected else "signal",
+                cycle_seq,
+            )
 
-        cycle_seq = await self._reserve_cycle_seq()
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-
-        # For HIP3-triggered cycles, pre-generate a minimal candidates file so the
-        # live agent will actually attempt the HIP3 symbol (HIP3 symbols do not always
-        # rank into top_opportunities).
-        candidates_file = self._write_hip3_candidates_file(
-            cycle_seq=cycle_seq,
-            symbol=symbol,
-            direction=direction,
-            z_score=z_score,
-            hip3_main=hip3_main,
-        )
-
-        ok = await self._emit_cycle(
-            cycle_seq=cycle_seq,
-            sse_seq=int(sequence),
-            symbols=self._current_symbols,
-            timestamp_utc=timestamp,
-            source="hip3",
-            candidates_file=candidates_file,
-            hip3_symbol=symbol,
-            hip3_now_ts=now,
-        )
-        if not ok:
-            return
-        self._hip3_symbol_last_dir[symbol] = direction
-
-        self.log.info(
-            "HIP3_TRIGGERED symbol=%s dir=%s z=%.3f age_sec=%.1f action=emit reason=%s seq=%s",
-            symbol,
-            direction,
-            z_score,
-            age_sec,
-            "direction_flip" if flip_detected else "signal",
-            cycle_seq,
-        )
+        if emitted:
+            self.log.info(
+                "HIP3_TRIGGER_BATCH emitted=%s max=%s candidates=%s sse_seq=%s",
+                emitted,
+                max_emits,
+                len(candidates),
+                int(sequence),
+            )
     
     async def _save_cycle_data(self, sequence: int, symbols: Dict[str, Any], *, sse_seq: Optional[int] = None) -> str:
         """Save full cycle data to JSON file.
@@ -1284,8 +1309,7 @@ class CycleTrigger:
         try:
             import re
 
-            keep_n = 20
-            keep_n = max(5, keep_n)  # never go below 5
+            keep_n = max(20, int(self._cfg.cycle_files_keep_n or 0))
 
             prefixes = (
                 "evclaw_cycle_",

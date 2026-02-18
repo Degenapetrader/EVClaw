@@ -737,11 +737,38 @@ def _entry_gate_enabled() -> bool:
     return entry_gate_enabled_env(False)
 
 
+def _is_prebuilt_hip3_candidates_payload(payload: Any) -> bool:
+    """Return True for cycle_trigger-generated HIP3 candidate payloads.
+
+    These payloads are intentionally prebuilt for interrupt cycles and may not
+    include `llm_gate` metadata.
+    """
+    if not isinstance(payload, dict):
+        return False
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return False
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").upper()
+        sig_snap = item.get("signals_snapshot")
+        if symbol.startswith("XYZ:") and isinstance(sig_snap, dict) and isinstance(sig_snap.get("hip3_main"), dict):
+            return True
+    return False
+
+
 def _should_reuse_candidates_file(output_file: str, *, gate_enabled: bool) -> bool:
     use_existing = Path(output_file).exists() and Path(output_file).stat().st_size > 10
     if gate_enabled and use_existing:
         existing_payload = load_candidates_file(output_file)
-        if not (isinstance(existing_payload, dict) and "llm_gate" in existing_payload):
+        if not isinstance(existing_payload, dict):
+            return False
+        if "llm_gate" in existing_payload:
+            return True
+        if _is_prebuilt_hip3_candidates_payload(existing_payload):
+            return True
+        if "llm_gate" not in existing_payload:
             return False
     return use_existing
 
