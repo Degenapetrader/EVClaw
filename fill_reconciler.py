@@ -123,6 +123,7 @@ class FillReconciler:
         self.venue = normalize_venue(venue)
         self.on_trade_close = on_trade_close
         self.log = get_logger(f"fill_reconciler.{self.venue}")
+        self._venue_query_aliases = self._venue_aliases_for_query(self.venue)
         self._running = False
         self.page_limit = page_limit
         self.max_pages = max_pages
@@ -142,6 +143,28 @@ class FillReconciler:
         self._symbol_lock_owner = f"fill_reconciler:{os.getpid()}:{id(self)}"
         self._cycle_count = 0
         self._backstop_every_cycles = int(BACKSTOP_EVERY_CYCLES)
+
+    @staticmethod
+    def _venue_aliases_for_query(venue: str) -> Tuple[str, ...]:
+        """Return DB venue aliases that should be reconciled together.
+
+        Legacy EVClaw DBs may store wallet rows under `hyperliquid_wallet`
+        while runtime now uses canonical `hyperliquid`. Reconciler must read
+        both to avoid stale open rows.
+        """
+        v = normalize_venue(venue)
+        if v == "hyperliquid":
+            return (
+                "hyperliquid",
+                "hyperliquid_wallet",
+                "hl_wallet",
+                "wallet",
+                "hip3",
+                "hip3_wallet",
+            )
+        if v == "lighter":
+            return ("lighter", "lighter_wallet")
+        return (v,)
 
     def _get_persistent_conn(self) -> sqlite3.Connection:
         with self._conn_lock:
@@ -802,9 +825,11 @@ class FillReconciler:
         """Load open trades for this venue."""
         with self._db_conn() as conn:
             conn.row_factory = sqlite3.Row
+            aliases = tuple(self._venue_query_aliases or (self.venue,))
+            placeholders = ",".join("?" for _ in aliases)
             cursor = conn.execute(
-                "SELECT * FROM trades WHERE venue = ? AND exit_time IS NULL ORDER BY entry_time DESC",
-                (self.venue,),
+                f"SELECT * FROM trades WHERE venue IN ({placeholders}) AND exit_time IS NULL ORDER BY entry_time DESC",
+                aliases,
             )
             return [dict(row) for row in cursor.fetchall()]
 

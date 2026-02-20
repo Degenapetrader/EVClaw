@@ -403,6 +403,46 @@ def test_backstop_runs_on_configured_cycle_interval() -> None:
     assert reconciler.backstop_calls == 2
 
 
+def test_backstop_closes_legacy_hyperliquid_wallet_rows() -> None:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    db = AITraderDB(db_path)
+    trade_id = db.log_trade_entry(
+        symbol="XYZ:AMD",
+        direction="LONG",
+        entry_price=100.0,
+        size=1.0,
+        venue="hyperliquid",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE trades SET venue = ? WHERE id = ?", ("hyperliquid_wallet", trade_id))
+        conn.commit()
+
+    reconciler = FillReconciler(
+        db_path=db_path,
+        exchange_adapter=MockFlatAdapter(),
+        venue="hyperliquid",
+        overlap_seconds=0,
+    )
+
+    closed = asyncio.run(reconciler._backstop_external_closes())
+    assert closed == 1
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT exit_time, exit_reason, state FROM trades WHERE id = ?",
+            (trade_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row["exit_time"] is not None
+    assert str(row["exit_reason"] or "").upper() == "EXTERNAL"
+    assert str(row["state"] or "").upper() == "CLOSED_EXTERNALLY"
+
+
 def test_fill_reconciler_paging_closes_trade() -> None:
     """Exit fill beyond first page still closes the trade."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
