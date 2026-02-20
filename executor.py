@@ -797,21 +797,14 @@ class Executor:
                     venue == VENUE_HYPERLIQUID
                     and self._is_builder_symbol(symbol)
                 ):
-                    # Canonicalize builder symbols onto Hyperliquid venue key.
-                    legacy_key = self._position_key(symbol, VENUE_HYPERLIQUID)
-                    if legacy_key in self._positions:
-                        del self._positions[legacy_key]
-                        updated = True
-                    if self.db:
-                        try:
-                            for t in self.db.get_open_trades_for_key(symbol=symbol, venue=VENUE_HYPERLIQUID):
-                                self.db.mark_trade_closed_externally(
-                                    t.id,
-                                    exit_reason="RECONCILE_LEGACY_BUILDER_VENUE",
-                                )
-                        except Exception:
-                            pass
-                    continue
+                    # Builder symbols are first-class on unified Hyperliquid venue.
+                    # Never force-close open builder trades here.
+                    # Only clean stale in-memory legacy keys (if any).
+                    for legacy_venue in ("hip3", "hyperliquid_wallet", "hl_wallet", "wallet"):
+                        legacy_key = self._position_key(symbol, legacy_venue)
+                        if legacy_key in self._positions:
+                            del self._positions[legacy_key]
+                            updated = True
 
                 if exchange_pos.size <= 0 or exchange_pos.direction == "FLAT":
                     continue

@@ -206,3 +206,59 @@ def test_load_positions_prefers_wallet_venue_for_builder_symbols() -> None:
     assert "hyperliquid:XYZ:NVDA" in positions
     assert positions["hyperliquid:XYZ:NVDA"].trade_id == 2
     assert ex.db.closed == [(1, "RECONCILE_DUPLICATE_OPEN_TRADE")]
+
+
+class _BuilderReconcileAdapter:
+    _initialized = True
+
+    async def get_all_positions(self):
+        return {
+            "XYZ:AMD": Position(
+                symbol="XYZ:AMD",
+                direction="LONG",
+                size=1.0,
+                entry_price=100.0,
+                unrealized_pnl=0.0,
+                venue="hyperliquid",
+            )
+        }
+
+
+class _NoopDb:
+    def __init__(self):
+        self.closed = []
+
+    def get_open_trades_for_key(self, *, symbol: str, venue: str):
+        return []
+
+    def mark_trade_closed_externally(self, trade_id: int, exit_reason: str = "EXTERNAL"):
+        self.closed.append((int(trade_id), str(exit_reason)))
+
+
+def test_reconcile_does_not_force_close_live_builder_rows() -> None:
+    ex = Executor(ExecutionConfig(dry_run=True, hl_enabled=True, lighter_enabled=False))
+    ex.hyperliquid = _BuilderReconcileAdapter()  # type: ignore[assignment]
+    ex.db = _NoopDb()  # type: ignore[assignment]
+    ex.persistence.save_positions_atomic = lambda _positions: None  # type: ignore[method-assign]
+
+    ex._positions = {
+        "hyperliquid:XYZ:AMD": Position(
+            symbol="XYZ:AMD",
+            direction="LONG",
+            size=1.0,
+            entry_price=100.0,
+            unrealized_pnl=0.0,
+            venue="hyperliquid",
+            trade_id=10,
+        )
+    }
+
+    async def _noop_protection():
+        return None
+
+    ex._place_protection_for_unprotected = _noop_protection  # type: ignore[assignment]
+
+    asyncio.run(ex._reconcile_positions_from_exchange())
+
+    assert "hyperliquid:XYZ:AMD" in ex._positions
+    assert ex.db.closed == []
