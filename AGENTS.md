@@ -110,6 +110,13 @@ Double-check scope (each run):
 - Node/tracker auth/data-path health.
 - Evidence integrity (no inferred claims without file/API proof).
 
+Repo update policy (hourly report):
+- Run deterministic repo check: `scripts/check_repo_update.py`.
+- If update is available and notify flag is yes, include changelog and ask:
+  "Update available for EVClaw. Do you want to update now? (yes/no)"
+- Update is always user-decision only.
+- Never run `git pull`, `bootstrap.sh`, `start.sh`, or `restart.sh` from cron without explicit user approval.
+
 Non-overlap rule:
 - This block is the single source of truth for scheduled supervisor behavior.
 - Cron prompts should reference this block, not duplicate policy text.

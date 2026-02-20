@@ -201,6 +201,7 @@ Operator note:
 
 - Deterministic ops cron runs every 15 minutes for reconciliation/maintenance.
 - OpenClaw hourly report cron posts a status summary to main chat.
+- Hourly report cron also runs deterministic repo update check and asks user for explicit yes/no before any update action.
 - Health/ops output is written to local runtime files and logs.
 
 ## Troubleshooting

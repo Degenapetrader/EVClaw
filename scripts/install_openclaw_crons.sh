@@ -28,6 +28,8 @@ DB_PATH="${EVCLAW_DB_PATH:-$ROOT_DIR/ai_trader.db}"
 RUNTIME_DIR="${EVCLAW_RUNTIME_DIR:-$ROOT_DIR/state}"
 REPORT_PATH="${EVCLAW_HOURLY_REPORT_PATH:-$RUNTIME_DIR/hourly_ops_report.json}"
 SUMMARY_PATH="${EVCLAW_HOURLY_SUMMARY_PATH:-$RUNTIME_DIR/hourly_ops_summary.txt}"
+UPDATE_REPORT_PATH="${EVCLAW_UPDATE_REPORT_PATH:-$RUNTIME_DIR/repo_update_report.json}"
+UPDATE_SUMMARY_PATH="${EVCLAW_UPDATE_SUMMARY_PATH:-$RUNTIME_DIR/repo_update_summary.txt}"
 AGENTS_PATH="$ROOT_DIR/AGENTS.md"
 
 JOB_NAME="EVClaw AGI Trader Hourly (deterministic)"
@@ -68,13 +70,19 @@ Workdir: $ROOT_DIR
 DB: $DB_PATH
 Report: $REPORT_PATH
 Summary: $SUMMARY_PATH
+Repo update report: $UPDATE_REPORT_PATH
+Repo update summary: $UPDATE_SUMMARY_PATH
 
 Read report + summary and post a compact operational check:
 0) Read ONLY AGENTS supervisor block in $AGENTS_PATH (between AGI_SUPERVISOR_MODE_START and AGI_SUPERVISOR_MODE_END). Ignore MANUAL_COMMANDS section.
-1) Confirm latest deterministic run freshness and status.
-2) Confirm key counters (open_trades, pending_limit_cancels, unprotected_perps, unprotected_builder, protection_unknown).
-3) Highlight any WARN/CRIT conditions and required operator actions.
-4) Do NOT run user-interactive commands (/trade, /execute, /best3, /hedge) in scheduled jobs.
+1) cd $ROOT_DIR && $EVCLAW_PYTHON scripts/check_repo_update.py --json-out $UPDATE_REPORT_PATH --summary-out $UPDATE_SUMMARY_PATH
+2) Confirm latest deterministic run freshness and status.
+3) Confirm key counters (open_trades, pending_limit_cancels, unprotected_perps, unprotected_builder, protection_unknown).
+4) Include repo update status from $UPDATE_SUMMARY_PATH.
+5) If repo_update_status=UPDATE_AVAILABLE and notify_user=yes, include changelog entries from $UPDATE_REPORT_PATH and ask user:
+   \"Update available for EVClaw. Do you want to update now? (yes/no)\"
+6) Never auto-update from cron: do NOT run git pull/bootstrap/start/restart unless user explicitly says yes.
+7) Do NOT run user-interactive commands (/trade, /execute, /best3, /hedge) in scheduled jobs.
 MSG
 )"
 
