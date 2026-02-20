@@ -33,7 +33,7 @@ from ai_trader_db import AITraderDB
 
 DEFAULT_DB_PATH = ROOT / "ai_trader.db"
 DEFAULT_MEMORY_DIR = ROOT / "memory"
-DEFAULT_RELEASE_TAG = "evclaw-learning-seed-v1-20260216"
+DEFAULT_RELEASE_TAG = "evclaw-learning-seed-v2-20260220"
 DEFAULT_RELEASE_BASE = (
     f"https://github.com/Degenapetrader/EVClaw/releases/download/{DEFAULT_RELEASE_TAG}"
 )

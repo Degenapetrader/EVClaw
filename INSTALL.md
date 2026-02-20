@@ -62,11 +62,11 @@ Core learning state is carried in `learning_state_kv` (`patterns`/`adjustments`)
 `symbol_policy` rows are optional and can be empty depending on source history/release.
 
 Release seed URL:
-- `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v1-20260216`
+- `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v2-20260220`
 
-Current official release seed note (v1, 2026-02-16):
+Current official release seed note (v2, 2026-02-20):
 - `learning_state_kv`: populated
-- `symbol_policy`: `0` rows (expected for this version)
+- `symbol_policy`: populated
 
 Import command:
 ```bash
