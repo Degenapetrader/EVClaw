@@ -57,6 +57,23 @@ config:
   decay:
     trend_flip_score_short: -40
     trend_flip_score_long: 40
+  countertrend_guard:
+    enabled: true
+    threshold_abs: 40
+    min_non_dead_confirmations: 2
+    confirmation_z_min: 2.0
+    require_positive_expectancy: true
+    expectancy_min_samples: 12
+    expectancy_lookback_hours: 168
+    risk_multiplier: 0.40
+    risk_cap_pct: 0.60
+    max_countertrend_picks_per_cycle: 1
+    kill_switch_sl_count: 3
+    kill_switch_sl_window_hours: 6
+    kill_switch_loss_r: -2.0
+    kill_switch_loss_window_hours: 12
+    cooldown_hours: 8
+    manual_block: false
   review:
     max_closes: 3
     max_hold_records: 20

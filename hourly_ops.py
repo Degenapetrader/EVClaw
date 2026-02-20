@@ -192,6 +192,55 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return default
 
 
+def _ensure_countertrend_guard_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS countertrend_guard_state_v1 (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            cooldown_until REAL,
+            manual_block INTEGER DEFAULT 0,
+            last_trigger_reason TEXT,
+            last_trigger_ts REAL,
+            updated_at REAL DEFAULT (strftime('%s','now'))
+        )
+        """
+    )
+
+
+def _countertrend_guard_status(conn: sqlite3.Connection) -> Dict[str, Any]:
+    now_ts = float(time.time())
+    _ensure_countertrend_guard_table(conn)
+    row = conn.execute(
+        """
+        SELECT cooldown_until, manual_block, last_trigger_reason, last_trigger_ts
+        FROM countertrend_guard_state_v1
+        WHERE id = 1
+        """
+    ).fetchone()
+    if row is None:
+        return {
+            "active": False,
+            "manual_block": False,
+            "cooldown_until": None,
+            "remaining_sec": 0.0,
+            "last_trigger_reason": None,
+            "last_trigger_ts": None,
+        }
+    cooldown_until = _safe_float(row["cooldown_until"], 0.0) if row["cooldown_until"] is not None else None
+    manual_block = bool(int(row["manual_block"] or 0))
+    remaining_sec = 0.0
+    if cooldown_until is not None and cooldown_until > now_ts:
+        remaining_sec = float(cooldown_until - now_ts)
+    return {
+        "active": bool(manual_block or remaining_sec > 0.0),
+        "manual_block": bool(manual_block),
+        "cooldown_until": float(cooldown_until) if cooldown_until is not None else None,
+        "remaining_sec": float(max(0.0, remaining_sec)),
+        "last_trigger_reason": str(row["last_trigger_reason"] or "").strip() or None,
+        "last_trigger_ts": _safe_float(row["last_trigger_ts"], 0.0) if row["last_trigger_ts"] is not None else None,
+    }
+
+
 def _symbol_to_coin(symbol: str) -> str:
     s = str(symbol or "").strip().upper()
     if ":" in s:
@@ -1110,6 +1159,7 @@ def _write_outputs(report: Dict[str, Any], *, json_out: Path, summary_out: Path)
     closes = report["checks"].get("closes_60m", {})
     audit = report["checks"].get("position_audit", {})
     refl = report["checks"].get("reflection_backfill", {})
+    ct_guard = report["checks"].get("countertrend_guard", {})
 
     line1 = (
         f"{REPO_NAME} {report['health']} "
@@ -1132,7 +1182,10 @@ def _write_outputs(report: Dict[str, Any], *, json_out: Path, summary_out: Path)
     line4 = (
         f"pending_expired_cancelled={int(pending.get('expired_cancelled', 0))} "
         f"unmatched_cancelled={int(unmatched.get('cancelled', 0))} "
-        f"reflection_enqueued={int(refl.get('inserted', 0))}"
+        f"reflection_enqueued={int(refl.get('inserted', 0))} "
+        f"ct_guard_active={1 if ct_guard.get('active') else 0} "
+        f"ct_guard_manual={1 if ct_guard.get('manual_block') else 0} "
+        f"ct_guard_remaining_s={int(_safe_float(ct_guard.get('remaining_sec', 0.0), 0.0))}"
     )
     lines = [line1, line2, line3, line4]
 
@@ -1321,7 +1374,10 @@ async def _run_hourly(args: argparse.Namespace) -> int:
         reflection = _enqueue_reflection_backfill(conn)
         report["checks"]["reflection_backfill"] = reflection
 
-        # 8) recent closes summary
+        # 8) countertrend guard status
+        report["checks"]["countertrend_guard"] = _countertrend_guard_status(conn)
+
+        # 9) recent closes summary
         report["checks"]["closes_60m"] = _recent_closes(conn)
         conn.commit()
     finally:

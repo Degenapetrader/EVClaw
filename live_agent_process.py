@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import json
 import os
+import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 
@@ -254,6 +257,340 @@ async def process_candidates_impl(
                 return float(default if raw is None else raw)
             except Exception:
                 return float(default)
+
+        countertrend_cfg = (config.get("config", {}).get("countertrend_guard", {}) or {})
+        ct_enabled = bool(countertrend_cfg.get("enabled", True))
+        ct_threshold_abs = max(1.0, abs(_cfg_float(countertrend_cfg, "threshold_abs", 40.0)))
+        ct_min_non_dead_confirmations = max(
+            1, int(countertrend_cfg.get("min_non_dead_confirmations", 2) or 2)
+        )
+        ct_confirmation_z_min = max(0.1, _cfg_float(countertrend_cfg, "confirmation_z_min", 2.0))
+        ct_require_positive_expectancy = bool(countertrend_cfg.get("require_positive_expectancy", True))
+        ct_expectancy_min_samples = max(
+            1, int(countertrend_cfg.get("expectancy_min_samples", 12) or 12)
+        )
+        ct_expectancy_lookback_hours = max(
+            1.0, _cfg_float(countertrend_cfg, "expectancy_lookback_hours", 168.0)
+        )
+        ct_risk_multiplier = max(0.05, min(1.0, _cfg_float(countertrend_cfg, "risk_multiplier", 0.40)))
+        ct_risk_cap_pct = max(0.05, _cfg_float(countertrend_cfg, "risk_cap_pct", 0.60))
+        ct_max_picks = max(0, int(countertrend_cfg.get("max_countertrend_picks_per_cycle", 1) or 1))
+        ct_kill_sl_count = max(1, int(countertrend_cfg.get("kill_switch_sl_count", 3) or 3))
+        ct_kill_sl_window_hours = max(
+            0.5, _cfg_float(countertrend_cfg, "kill_switch_sl_window_hours", 6.0)
+        )
+        ct_kill_loss_r = _cfg_float(countertrend_cfg, "kill_switch_loss_r", -2.0)
+        ct_kill_loss_window_hours = max(
+            0.5, _cfg_float(countertrend_cfg, "kill_switch_loss_window_hours", 12.0)
+        )
+        ct_cooldown_hours = max(0.25, _cfg_float(countertrend_cfg, "cooldown_hours", 8.0))
+        ct_manual_block_cfg = bool(countertrend_cfg.get("manual_block", False))
+
+        def _ct_countertrend(direction_raw: Any, trend_score_raw: Any) -> bool:
+            try:
+                d = str(direction_raw or "").upper().strip()
+                ts = float(trend_score_raw)
+            except Exception:
+                return False
+            return (d == "LONG" and ts <= -ct_threshold_abs) or (d == "SHORT" and ts >= ct_threshold_abs)
+
+        def _ct_non_dead_confirms(candidate_obj: Dict[str, Any], direction_raw: Any) -> int:
+            direction_norm = str(direction_raw or "").upper().strip()
+            sig_snap = candidate_obj.get("signals_snapshot")
+            if not isinstance(sig_snap, dict):
+                return 0
+            count = 0
+            for name in ("whale", "ofm", "cvd", "fade", "hip3_main"):
+                payload = sig_snap.get(name)
+                if not isinstance(payload, dict):
+                    continue
+                sig_dir = str(payload.get("direction") or payload.get("signal") or "").upper().strip()
+                if sig_dir in ("LONG", "SHORT") and direction_norm in ("LONG", "SHORT") and sig_dir != direction_norm:
+                    continue
+                z_vals = []
+                for key in ("z_score", "z_smart", "z_dumb", "strength"):
+                    try:
+                        if payload.get(key) is not None:
+                            z_vals.append(abs(float(payload.get(key))))
+                    except Exception:
+                        continue
+                z_val = max(z_vals) if z_vals else 0.0
+                banner = bool(payload.get("banner_trigger", False))
+                if name == "hip3_main":
+                    flow_pass = bool(payload.get("flow_pass"))
+                    ofm_pass = payload.get("ofm_pass")
+                    if flow_pass and (ofm_pass is None or bool(ofm_pass)):
+                        count += 1
+                        continue
+                if banner or z_val >= ct_confirmation_z_min:
+                    count += 1
+            return int(count)
+
+        def _ct_dead_only(candidate_obj: Dict[str, Any]) -> bool:
+            sigs = [
+                str(s).upper().strip()
+                for s in (candidate_obj.get("signals") or [])
+                if isinstance(s, str) and str(s).strip()
+            ]
+            if sigs:
+                return bool(sigs) and all(s.startswith("DEAD_CAPITAL") for s in sigs)
+            sig_snap = candidate_obj.get("signals_snapshot")
+            if not isinstance(sig_snap, dict):
+                return False
+            directional_keys = []
+            for name, payload in sig_snap.items():
+                if not isinstance(payload, dict):
+                    continue
+                sig_dir = str(payload.get("direction") or payload.get("signal") or "").upper().strip()
+                if sig_dir in ("LONG", "SHORT"):
+                    directional_keys.append(str(name or "").lower())
+            return bool(directional_keys) and all(k == "dead_capital" for k in directional_keys)
+
+        def _ct_ensure_table(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS countertrend_guard_state_v1 (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    cooldown_until REAL,
+                    manual_block INTEGER DEFAULT 0,
+                    last_trigger_reason TEXT,
+                    last_trigger_ts REAL,
+                    updated_at REAL DEFAULT (strftime('%s','now'))
+                )
+                """
+            )
+
+        def _ct_read_state(now_ts: float) -> Dict[str, Any]:
+            out: Dict[str, Any] = {
+                "enabled": bool(ct_enabled),
+                "active": False,
+                "manual_block": False,
+                "cooldown_until": None,
+                "remaining_sec": 0.0,
+                "last_trigger_reason": None,
+                "last_trigger_ts": None,
+            }
+            if not ct_enabled:
+                return out
+            try:
+                with sqlite3.connect(str(deps.db_path), timeout=30.0) as conn:
+                    conn.row_factory = sqlite3.Row
+                    _ct_ensure_table(conn)
+                    row = conn.execute(
+                        """
+                        SELECT cooldown_until, manual_block, last_trigger_reason, last_trigger_ts
+                        FROM countertrend_guard_state_v1
+                        WHERE id = 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.execute(
+                            """
+                            INSERT INTO countertrend_guard_state_v1 (
+                                id, cooldown_until, manual_block, updated_at
+                            ) VALUES (1, NULL, ?, ?)
+                            """,
+                            (1 if ct_manual_block_cfg else 0, float(now_ts)),
+                        )
+                        conn.commit()
+                        row = conn.execute(
+                            """
+                            SELECT cooldown_until, manual_block, last_trigger_reason, last_trigger_ts
+                            FROM countertrend_guard_state_v1
+                            WHERE id = 1
+                            """
+                        ).fetchone()
+                    cooldown_until = (
+                        float(row["cooldown_until"])
+                        if row is not None and row["cooldown_until"] is not None
+                        else None
+                    )
+                    manual_block = bool(int(row["manual_block"] or 0)) if row is not None else False
+                    remaining = 0.0
+                    if cooldown_until is not None and cooldown_until > now_ts:
+                        remaining = float(cooldown_until - now_ts)
+                    out.update(
+                        {
+                            "active": bool(manual_block or remaining > 0.0),
+                            "manual_block": bool(manual_block),
+                            "cooldown_until": float(cooldown_until) if cooldown_until is not None else None,
+                            "remaining_sec": float(max(0.0, remaining)),
+                            "last_trigger_reason": str(row["last_trigger_reason"] or "").strip() if row is not None else None,
+                            "last_trigger_ts": (
+                                float(row["last_trigger_ts"]) if row is not None and row["last_trigger_ts"] is not None else None
+                            ),
+                        }
+                    )
+            except Exception as exc:
+                out["error"] = str(exc)
+            return out
+
+        def _ct_write_state(
+            *,
+            now_ts: float,
+            cooldown_until: Optional[float] = None,
+            manual_block: Optional[bool] = None,
+            trigger_reason: Optional[str] = None,
+        ) -> None:
+            if not ct_enabled:
+                return
+            try:
+                with sqlite3.connect(str(deps.db_path), timeout=30.0) as conn:
+                    conn.row_factory = sqlite3.Row
+                    _ct_ensure_table(conn)
+                    row = conn.execute(
+                        """
+                        SELECT cooldown_until, manual_block, last_trigger_reason, last_trigger_ts
+                        FROM countertrend_guard_state_v1
+                        WHERE id = 1
+                        """
+                    ).fetchone()
+                    prev_cooldown = (
+                        float(row["cooldown_until"])
+                        if row is not None and row["cooldown_until"] is not None
+                        else None
+                    )
+                    prev_manual = bool(int(row["manual_block"] or 0)) if row is not None else False
+                    prev_reason = str(row["last_trigger_reason"] or "").strip() if row is not None else None
+                    prev_ts = float(row["last_trigger_ts"]) if row is not None and row["last_trigger_ts"] is not None else None
+                    next_cooldown = prev_cooldown if cooldown_until is None else float(cooldown_until)
+                    next_manual = prev_manual if manual_block is None else bool(manual_block)
+                    next_reason = prev_reason if trigger_reason is None else str(trigger_reason)
+                    next_ts = prev_ts if trigger_reason is None else float(now_ts)
+                    conn.execute(
+                        """
+                        INSERT INTO countertrend_guard_state_v1 (
+                            id, cooldown_until, manual_block, last_trigger_reason, last_trigger_ts, updated_at
+                        ) VALUES (1, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            cooldown_until = excluded.cooldown_until,
+                            manual_block = excluded.manual_block,
+                            last_trigger_reason = excluded.last_trigger_reason,
+                            last_trigger_ts = excluded.last_trigger_ts,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            next_cooldown,
+                            1 if next_manual else 0,
+                            next_reason,
+                            next_ts,
+                            float(now_ts),
+                        ),
+                    )
+                    conn.commit()
+            except Exception as exc:
+                print(f"Warning: failed to persist countertrend guard state: {exc}")
+
+        def _ct_trade_is_countertrend(row: sqlite3.Row) -> bool:
+            if row is None:
+                return False
+            ctx: Dict[str, Any] = {}
+            try:
+                raw_ctx = row["context_snapshot"]
+                if isinstance(raw_ctx, dict):
+                    ctx = raw_ctx
+                elif raw_ctx:
+                    parsed = json.loads(raw_ctx)
+                    if isinstance(parsed, dict):
+                        ctx = parsed
+            except Exception:
+                ctx = {}
+            risk_obj = ctx.get("risk") if isinstance(ctx.get("risk"), dict) else {}
+            if bool(ctx.get("countertrend_40")) or bool(risk_obj.get("countertrend_40")):
+                return True
+            trend_raw = ctx.get("trend_score")
+            if trend_raw is None:
+                km = ctx.get("key_metrics") if isinstance(ctx.get("key_metrics"), dict) else {}
+                ts = km.get("trend_state") if isinstance(km.get("trend_state"), dict) else {}
+                trend_raw = ts.get("trend_score")
+            return _ct_countertrend(row["direction"], trend_raw)
+
+        def _ct_recent_stats(now_ts: float) -> Dict[str, Any]:
+            out = {"sl_count": 0, "loss_r": 0.0}
+            if not ct_enabled:
+                return out
+            cutoff_hours = max(ct_kill_sl_window_hours, ct_kill_loss_window_hours)
+            cutoff_ts = float(now_ts - (cutoff_hours * 3600.0))
+            sl_cutoff_ts = float(now_ts - (ct_kill_sl_window_hours * 3600.0))
+            loss_cutoff_ts = float(now_ts - (ct_kill_loss_window_hours * 3600.0))
+            try:
+                with sqlite3.connect(str(deps.db_path), timeout=30.0) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute(
+                        """
+                        SELECT exit_time, exit_reason, realized_pnl, risk_pct_used, equity_at_entry, direction, context_snapshot
+                        FROM trades
+                        WHERE state = 'CLOSED' AND exit_time IS NOT NULL AND exit_time >= ?
+                        ORDER BY exit_time DESC
+                        """,
+                        (cutoff_ts,),
+                    ).fetchall()
+                sl_count = 0
+                loss_r = 0.0
+                for row in rows:
+                    if not _ct_trade_is_countertrend(row):
+                        continue
+                    try:
+                        exit_ts = float(row["exit_time"])
+                    except Exception:
+                        continue
+                    reason = str(row["exit_reason"] or "").upper().strip()
+                    if exit_ts >= sl_cutoff_ts and reason in {"SL", "STOP_LOSS", "STOP"}:
+                        sl_count += 1
+                    if exit_ts >= loss_cutoff_ts:
+                        try:
+                            pnl_usd = float(row["realized_pnl"] or 0.0)
+                        except Exception:
+                            pnl_usd = 0.0
+                        pnl_r = 0.0
+                        try:
+                            denom = float(row["equity_at_entry"]) * (float(row["risk_pct_used"]) / 100.0)
+                            if denom > 0:
+                                pnl_r = pnl_usd / denom
+                        except Exception:
+                            pnl_r = 0.0
+                        loss_r += float(pnl_r)
+                out["sl_count"] = int(sl_count)
+                out["loss_r"] = float(loss_r)
+            except Exception as exc:
+                out["error"] = str(exc)
+            return out
+
+        def _ct_symbol_expectancy(symbol_raw: Any, now_ts: float) -> Tuple[bool, int, Optional[float]]:
+            symbol_norm = str(symbol_raw or "").upper().strip()
+            if not symbol_norm:
+                return False, 0, None
+            cutoff_ts = float(now_ts - (ct_expectancy_lookback_hours * 3600.0))
+            samples: list[float] = []
+            try:
+                with sqlite3.connect(str(deps.db_path), timeout=30.0) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute(
+                        """
+                        SELECT realized_pnl, risk_pct_used, equity_at_entry
+                        FROM trades
+                        WHERE state = 'CLOSED' AND symbol = ? AND exit_time IS NOT NULL AND exit_time >= ?
+                        ORDER BY exit_time DESC
+                        """,
+                        (symbol_norm, cutoff_ts),
+                    ).fetchall()
+                for row in rows:
+                    try:
+                        pnl_usd = float(row["realized_pnl"] or 0.0)
+                        denom = float(row["equity_at_entry"]) * (float(row["risk_pct_used"]) / 100.0)
+                        if denom > 0:
+                            samples.append(float(pnl_usd / denom))
+                    except Exception:
+                        continue
+            except Exception:
+                return False, 0, None
+            n = len(samples)
+            if n <= 0:
+                return False, 0, None
+            expectancy = float(sum(samples) / float(n))
+            ok = bool(n >= ct_expectancy_min_samples and expectancy > 0.0)
+            return ok, int(n), float(expectancy)
+
         fallback_equity = await _resolve_starting_equity(config)
         safety_mgr: Optional[SafetyManager] = None
         if bool(safety_cfg.get("enabled", True)):
@@ -415,6 +752,38 @@ async def process_candidates_impl(
                 f"using monitor snapshot fallback gross={projected_total_exposure:.2f}: {exc}"
             )
         approved_keys: Set[Tuple[str, str, str]] = set()
+        countertrend_picks_this_cycle = 0
+        ct_now_ts = time.time()
+        ct_guard_state: Dict[str, Any] = {"enabled": bool(ct_enabled), "active": False}
+        if ct_enabled:
+            _ct_write_state(now_ts=ct_now_ts, manual_block=ct_manual_block_cfg)
+            ct_guard_state = _ct_read_state(ct_now_ts)
+            if not bool(ct_guard_state.get("active")):
+                ct_stats = _ct_recent_stats(ct_now_ts)
+                trigger_reason = None
+                if int(ct_stats.get("sl_count", 0)) >= int(ct_kill_sl_count):
+                    trigger_reason = (
+                        f"countertrend_sl_cluster sl_count={int(ct_stats.get('sl_count', 0))}"
+                        f"/{int(ct_kill_sl_count)} window_h={ct_kill_sl_window_hours:.1f}"
+                    )
+                elif float(ct_stats.get("loss_r", 0.0)) <= float(ct_kill_loss_r):
+                    trigger_reason = (
+                        f"countertrend_loss_cluster loss_r={float(ct_stats.get('loss_r', 0.0)):.3f}"
+                        f"<= {float(ct_kill_loss_r):.3f} window_h={ct_kill_loss_window_hours:.1f}"
+                    )
+                if trigger_reason:
+                    cooldown_until = float(ct_now_ts + (ct_cooldown_hours * 3600.0))
+                    _ct_write_state(
+                        now_ts=ct_now_ts,
+                        cooldown_until=cooldown_until,
+                        manual_block=ct_manual_block_cfg,
+                        trigger_reason=trigger_reason,
+                    )
+                    ct_guard_state = _ct_read_state(ct_now_ts)
+                    ct_guard_state["triggered_this_cycle"] = trigger_reason
+                ct_guard_state["recent_sl_count"] = int(ct_stats.get("sl_count", 0))
+                ct_guard_state["recent_loss_r"] = round(float(ct_stats.get("loss_r", 0.0)), 4)
+            summary["countertrend_guard"] = ct_guard_state
 
         for candidate in kept:
             symbol = candidate["symbol"]
@@ -621,8 +990,12 @@ async def process_candidates_impl(
                     if not candidate_venues:
                         continue
 
-            # Gate: DEAD_CAPITAL-only entries must respect trend regime.
-            # Prevent churn where dead_capital suggests LONG but trend_state is SHORT_ONLY (or vice-versa).
+            # Trend/countertrend policy guard.
+            countertrend_40 = False
+            countertrend_non_dead_confirms = 0
+            countertrend_expectancy_r: Optional[float] = None
+            countertrend_expectancy_samples = 0
+            trend_score: Optional[float] = None
             try:
                 km = (candidate.get("context_snapshot") or {}).get("key_metrics") if isinstance(candidate.get("context_snapshot"), dict) else {}
                 km = km or {}
@@ -633,26 +1006,104 @@ async def process_candidates_impl(
                 sigs = [str(s).upper().strip() for s in (candidate.get("signals") or []) if isinstance(s, str) and str(s).strip()]
                 dead_only = bool(sigs) and all(s.startswith("DEAD_CAPITAL") for s in sigs)
 
-                conflict = False
-                if trend_score is not None:
-                    if direction == "LONG" and trend_score <= -80:
-                        conflict = True
-                    if direction == "SHORT" and trend_score >= 80:
-                        conflict = True
-
-                if conflict and dead_only:
+                countertrend_40 = _ct_countertrend(direction, trend_score)
+                if countertrend_40 and dead_only:
                     _block_candidate(
                         db=db,
                         summary=summary,
                         seq=seq,
                         candidate=candidate,
-                        reason=f"dead_capital_conflicts_trend_regime (trend_score={trend_score:.0f} regime={regime or 'unknown'})",
+                        reason=(
+                            f"countertrend_dead_capital_only_blocked "
+                            f"(trend_score={trend_score:.0f} regime={regime or 'unknown'})"
+                        ),
                         venues=candidate_venues,
                         block_count=len(candidate_venues),
                     )
                     continue
+
+                if ct_enabled and countertrend_40:
+                    if bool(ct_guard_state.get("active")):
+                        _block_candidate(
+                            db=db,
+                            summary=summary,
+                            seq=seq,
+                            candidate=candidate,
+                            reason=(
+                                f"countertrend_guard_active "
+                                f"(remaining_s={int(float(ct_guard_state.get('remaining_sec', 0.0) or 0.0))} "
+                                f"manual={1 if ct_guard_state.get('manual_block') else 0})"
+                            ),
+                            venues=candidate_venues,
+                            block_count=len(candidate_venues),
+                        )
+                        continue
+                    countertrend_non_dead_confirms = _ct_non_dead_confirms(candidate, direction)
+                    if countertrend_non_dead_confirms < ct_min_non_dead_confirmations:
+                        _block_candidate(
+                            db=db,
+                            summary=summary,
+                            seq=seq,
+                            candidate=candidate,
+                            reason=(
+                                f"countertrend_insufficient_non_dead_confirmations "
+                                f"({countertrend_non_dead_confirms}<{ct_min_non_dead_confirmations})"
+                            ),
+                            venues=candidate_venues,
+                            block_count=len(candidate_venues),
+                        )
+                        continue
+                    if _ct_dead_only(candidate):
+                        _block_candidate(
+                            db=db,
+                            summary=summary,
+                            seq=seq,
+                            candidate=candidate,
+                            reason="countertrend_dead_capital_only_blocked",
+                            venues=candidate_venues,
+                            block_count=len(candidate_venues),
+                        )
+                        continue
+                    if ct_require_positive_expectancy:
+                        exp_ok, countertrend_expectancy_samples, countertrend_expectancy_r = _ct_symbol_expectancy(symbol, ct_now_ts)
+                        if not exp_ok:
+                            _block_candidate(
+                                db=db,
+                                summary=summary,
+                                seq=seq,
+                                candidate=candidate,
+                                reason=(
+                                    f"countertrend_expectancy_non_positive "
+                                    f"(samples={countertrend_expectancy_samples} "
+                                    f"expectancy_r={countertrend_expectancy_r if countertrend_expectancy_r is not None else 'NA'})"
+                                ),
+                                venues=candidate_venues,
+                                block_count=len(candidate_venues),
+                            )
+                            continue
+                    if ct_max_picks > 0 and countertrend_picks_this_cycle >= ct_max_picks:
+                        _block_candidate(
+                            db=db,
+                            summary=summary,
+                            seq=seq,
+                            candidate=candidate,
+                            reason=f"countertrend_cycle_cap_reached ({ct_max_picks})",
+                            venues=candidate_venues,
+                            block_count=len(candidate_venues),
+                        )
+                        continue
+                    countertrend_picks_this_cycle += 1
+                    risk_tag = dict(candidate.get("risk") or {})
+                    risk_tag["countertrend_40"] = True
+                    if trend_score is not None:
+                        risk_tag["countertrend_trend_score"] = round(float(trend_score), 3)
+                    risk_tag["countertrend_non_dead_confirms"] = int(countertrend_non_dead_confirms)
+                    if countertrend_expectancy_r is not None:
+                        risk_tag["countertrend_expectancy_r"] = round(float(countertrend_expectancy_r), 6)
+                    risk_tag["countertrend_expectancy_samples"] = int(countertrend_expectancy_samples)
+                    candidate["risk"] = risk_tag
             except Exception as exc:
-                print(f"Warning: dead-capital trend regime gate failed open for {symbol}: {exc}")
+                print(f"Warning: countertrend gate failed open for {symbol}: {exc}")
 
             # Re-entry cooldowns (time-based): block re-entry after SL / DECAY_EXIT / EXIT / TP.
             # - SL cooldown: default 60m
@@ -913,6 +1364,25 @@ async def process_candidates_impl(
                 sl_atr_mult_override = risk_override.get("sl_atr_mult")
                 tp_atr_mult_override = risk_override.get("tp_atr_mult")
 
+            if countertrend_40:
+                risk_pct_candidate_lighter, _ = clamp_risk_pct(
+                    risk_pct_candidate_lighter * ct_risk_multiplier,
+                    min_pct=0.05,
+                    max_pct=ct_risk_cap_pct,
+                )
+                risk_pct_candidate_hl, _ = clamp_risk_pct(
+                    risk_pct_candidate_hl * ct_risk_multiplier,
+                    min_pct=0.05,
+                    max_pct=ct_risk_cap_pct,
+                )
+                effective_size_mult *= float(ct_risk_multiplier)
+                try:
+                    candidate["risk"] = dict(candidate.get("risk") or {})
+                    candidate["risk"]["countertrend_risk_mult"] = round(float(ct_risk_multiplier), 4)
+                    candidate["risk"]["countertrend_risk_cap_pct"] = round(float(ct_risk_cap_pct), 4)
+                except Exception:
+                    pass
+
             # Opt2 (LLM) size multiple: scale risk_pct (then clamp). Range [0.5, 2.0].
             llm_mult = None
             try:
@@ -920,6 +1390,8 @@ async def process_candidates_impl(
             except Exception:
                 llm_mult = None
             if llm_mult is not None and llm_mult > 0:
+                if countertrend_40 and llm_mult > 1.0:
+                    llm_mult = 1.0
                 llm_mult = max(0.5, min(2.0, float(llm_mult)))
                 if llm_mult != 1.0:
                     risk_pct_candidate_lighter, _ = clamp_risk_pct(risk_pct_candidate_lighter * llm_mult)
@@ -930,6 +1402,18 @@ async def process_candidates_impl(
                         candidate["risk"]["llm_size_mult"] = round(llm_mult, 4)
                     except Exception:
                         pass
+
+            if countertrend_40:
+                risk_pct_candidate_lighter, _ = clamp_risk_pct(
+                    risk_pct_candidate_lighter,
+                    min_pct=0.05,
+                    max_pct=ct_risk_cap_pct,
+                )
+                risk_pct_candidate_hl, _ = clamp_risk_pct(
+                    risk_pct_candidate_hl,
+                    min_pct=0.05,
+                    max_pct=ct_risk_cap_pct,
+                )
 
             hl_sizing_equity = hl_equity
 
@@ -979,6 +1463,14 @@ async def process_candidates_impl(
                 risk_meta["size_multiplier_effective"] = round(float(effective_size_mult), 4)
                 if llm_mult is not None and llm_mult > 0:
                     risk_meta["llm_size_mult"] = round(float(llm_mult), 4)
+                risk_meta["countertrend_40"] = bool(countertrend_40)
+                if countertrend_40:
+                    if trend_score is not None:
+                        risk_meta["countertrend_trend_score"] = round(float(trend_score), 3)
+                    risk_meta["countertrend_non_dead_confirms"] = int(countertrend_non_dead_confirms)
+                    risk_meta["countertrend_expectancy_samples"] = int(countertrend_expectancy_samples)
+                    if countertrend_expectancy_r is not None:
+                        risk_meta["countertrend_expectancy_r"] = round(float(countertrend_expectancy_r), 6)
                 risk_meta["risk_pct_used_by_venue"] = {
                     VENUE_LIGHTER: float(risk_pct_candidate_lighter),
                     VENUE_HYPERLIQUID: float(risk_pct_candidate_hl),
