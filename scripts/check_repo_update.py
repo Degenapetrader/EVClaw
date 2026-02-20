@@ -4,6 +4,7 @@
 This script compares local HEAD with origin/main and writes:
 - JSON report (machine-readable)
 - summary text (cron-friendly)
+- markdown changelog block (chat-ready)
 
 It never mutates the working tree and never applies updates.
 """
@@ -22,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_DIR = ROOT / "state"
 DEFAULT_JSON_OUT = RUNTIME_DIR / "repo_update_report.json"
 DEFAULT_SUMMARY_OUT = RUNTIME_DIR / "repo_update_summary.txt"
+DEFAULT_CHANGELOG_MD_OUT = RUNTIME_DIR / "repo_update_changelog.md"
 DEFAULT_STATE_PATH = RUNTIME_DIR / "repo_update_state.json"
 
 
@@ -75,6 +77,63 @@ def _write_summary(path: Path, lines: List[str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _fmt_yes_no(v: bool) -> str:
+    return "yes" if bool(v) else "no"
+
+
+def _write_changelog_md(
+    path: Path,
+    *,
+    status: str,
+    remote_ref: str,
+    local_head: str,
+    remote_head: str,
+    ahead: int,
+    behind: int,
+    notify_user: bool,
+    changelog_lines: List[str],
+    error: str = "",
+) -> None:
+    lines: List[str] = []
+    lines.append("## EVClaw Repository Update")
+    lines.append(f"- Status: `{status}`")
+    if local_head:
+        lines.append(f"- Local HEAD: `{local_head[:12]}`")
+    if remote_head:
+        lines.append(f"- Remote HEAD ({remote_ref}): `{remote_head[:12]}`")
+    lines.append(f"- Ahead/Behind: `{int(ahead)}/{int(behind)}`")
+
+    if status == "UPDATE_AVAILABLE":
+        lines.append(f"- Notify user now: `{_fmt_yes_no(notify_user)}`")
+        lines.append("")
+        lines.append("### Changelog (HEAD..remote)")
+        if changelog_lines:
+            for raw in changelog_lines:
+                txt = str(raw or "").strip()
+                if not txt:
+                    continue
+                parts = txt.split(" ", 2)
+                if len(parts) == 3:
+                    h, d, s = parts
+                    lines.append(f"- `{h}` {d} {s}")
+                else:
+                    lines.append(f"- {txt}")
+        else:
+            lines.append("- No changelog entries found.")
+    elif status == "UP_TO_DATE":
+        lines.append("- Repo is up to date.")
+    else:
+        lines.append("- Update check failed.")
+        if error:
+            lines.append("")
+            lines.append("```text")
+            lines.append(str(error))
+            lines.append("```")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Check EVClaw repo updates without applying changes.")
     ap.add_argument("--remote", default="origin", help="Git remote name (default: origin)")
@@ -83,6 +142,7 @@ def main() -> int:
     ap.add_argument("--remind-seconds", type=int, default=86400, help="Reminder interval when update is still pending")
     ap.add_argument("--json-out", default=str(DEFAULT_JSON_OUT), help="Output JSON path")
     ap.add_argument("--summary-out", default=str(DEFAULT_SUMMARY_OUT), help="Output summary path")
+    ap.add_argument("--changelog-md-out", default=str(DEFAULT_CHANGELOG_MD_OUT), help="Output markdown changelog path")
     ap.add_argument("--state-path", default=str(DEFAULT_STATE_PATH), help="Persistent state path for notify throttling")
     args = ap.parse_args()
 
@@ -90,6 +150,7 @@ def main() -> int:
     remote_ref = f"{args.remote}/{args.branch}"
     json_out = Path(args.json_out)
     summary_out = Path(args.summary_out)
+    changelog_md_out = Path(args.changelog_md_out)
     state_path = Path(args.state_path)
 
     report: Dict[str, Any] = {
@@ -109,10 +170,12 @@ def main() -> int:
         "remote_head": "",
         "changelog": [],
         "changelog_total": 0,
+        "changelog_md_path": str(changelog_md_out),
         "error": "",
     }
 
     summary_lines: List[str] = []
+    changelog_md_lines: List[str] = []
 
     try:
         _run_git(["rev-parse", "--is-inside-work-tree"])
@@ -167,6 +230,7 @@ def main() -> int:
             state_out["last_notified_remote"] = remote_head
         _write_json(state_path, state_out)
 
+        changelog_limited = changelog_all[: max(0, int(args.changelog_limit))]
         report.update(
             {
                 "status": "UPDATE_AVAILABLE" if update_available else "UP_TO_DATE",
@@ -178,7 +242,7 @@ def main() -> int:
                 "local_head": local_head,
                 "remote_head": remote_head,
                 "branch_local": branch_name,
-                "changelog": changelog_all[: max(0, int(args.changelog_limit))],
+                "changelog": changelog_limited,
                 "changelog_total": len(changelog_all),
                 "error": "",
             }
@@ -200,10 +264,13 @@ def main() -> int:
                 remind=int(args.remind_seconds),
             )
         )
+        summary_lines.append(f"changelog_md_path={str(changelog_md_out)}")
         if changelog_all:
             summary_lines.append(f"changelog_top1={changelog_all[0]}")
         else:
             summary_lines.append("changelog_top1=")
+
+        changelog_md_lines = changelog_limited
 
     except Exception as exc:
         report["status"] = "CHECK_FAILED"
@@ -212,11 +279,25 @@ def main() -> int:
             "repo_update_status=CHECK_FAILED",
             f"error={str(exc)}",
             "notify_user=no remote_changed=no remind_seconds=0",
+            f"changelog_md_path={str(changelog_md_out)}",
             "changelog_top1=",
         ]
+        changelog_md_lines = []
 
     _write_json(json_out, report)
     _write_summary(summary_out, summary_lines)
+    _write_changelog_md(
+        changelog_md_out,
+        status=str(report.get("status") or "CHECK_FAILED"),
+        remote_ref=remote_ref,
+        local_head=str(report.get("local_head") or ""),
+        remote_head=str(report.get("remote_head") or ""),
+        ahead=int(report.get("ahead") or 0),
+        behind=int(report.get("behind") or 0),
+        notify_user=bool(report.get("notify_user")),
+        changelog_lines=changelog_md_lines,
+        error=str(report.get("error") or ""),
+    )
     return 0
 
 
