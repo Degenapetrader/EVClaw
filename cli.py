@@ -840,7 +840,7 @@ async def cmd_guardian(
                             db.link_gate_decision_to_proposal(
                                 gate_decision_id=int(gate_decision_id),
                                 proposal_id=int(proposal_id),
-                                venue=str(venue or "").lower() or None,
+                                venue=normalize_venue(venue or "") or None,
                             )
                         except Exception:
                             pass
@@ -850,7 +850,7 @@ async def cmd_guardian(
                     entry_gate = dict(entry_gate) if isinstance(entry_gate, dict) else {}
                     entry_gate["gate_decision_id"] = int(gate_decision_id)
                     entry_gate["proposal_id"] = int(proposal_id)
-                    entry_gate["venue"] = str(venue or "").lower() or None
+                    entry_gate["venue"] = normalize_venue(venue or "") or None
                     if gate_session_id:
                         entry_gate["gate_session_id"] = gate_session_id
                     if gate_decision_reason:
@@ -872,7 +872,7 @@ async def cmd_guardian(
                 decision.size_usd = size_usd
                 if isinstance(proposal_meta.get("risk"), dict):
                     risk_meta = dict(proposal_meta.get("risk") or {})
-                    venue_key = str(venue or "").lower()
+                    venue_key = normalize_venue(venue or "")
                     risk_by_venue = risk_meta.get("risk_pct_used_by_venue")
                     equity_by_venue = risk_meta.get("equity_at_entry_by_venue")
                     if isinstance(risk_by_venue, dict):
@@ -1196,11 +1196,11 @@ async def cmd_guardian(
                         risk_by_venue = pending_risk.get("risk_pct_used_by_venue")
                         equity_by_venue = pending_risk.get("equity_at_entry_by_venue")
                         if isinstance(risk_by_venue, dict):
-                            rv = risk_by_venue.get(str(venue or "").lower())
+                            rv = risk_by_venue.get(normalize_venue(venue or ""))
                             if rv is not None:
                                 pending_risk["risk_pct_used"] = rv
                         if isinstance(equity_by_venue, dict):
-                            ev = equity_by_venue.get(str(venue or "").lower())
+                            ev = equity_by_venue.get(normalize_venue(venue or ""))
                             if ev is not None:
                                 pending_risk["equity_at_entry"] = ev
                     if pending_risk:
@@ -1796,7 +1796,7 @@ def main():
     exec_parser.add_argument('--size-usd', required=True, type=float, help='Position size in USD')
     exec_parser.add_argument('--venue', required=True, choices=[
         'hyperliquid', 'hip3', 'lighter',
-        'hl_wallet', 'lighter_wallet',
+        'hl_wallet', 'hyperliquid_wallet', 'lighter_wallet',
     ],
                               help='Target exchange venue')
     exec_parser.add_argument('--dry-run', action='store_true', help='Dry run (no real orders)')
@@ -1814,7 +1814,7 @@ def main():
     trade_parser.add_argument('size_usd', type=float, help='Position notional in USD')
     trade_parser.add_argument('--venue', required=True, choices=[
         'hyperliquid', 'hip3', 'lighter',
-        'hl_wallet', 'lighter_wallet',
+        'hl_wallet', 'hyperliquid_wallet', 'lighter_wallet',
     ],
                               help='Target exchange venue')
     trade_parser.add_argument('--dry-run', action='store_true', help='Dry run (no real orders)')
@@ -1831,7 +1831,7 @@ def main():
     pos_parser.add_argument('--close', metavar='SYMBOL', help='Close position for symbol')
     pos_parser.add_argument('--venue', choices=[
         'hyperliquid', 'hip3', 'lighter',
-        'hl_wallet', 'lighter_wallet',
+        'hl_wallet', 'hyperliquid_wallet', 'lighter_wallet',
     ],
                              help='Target exchange venue (required with --close)')
     pos_parser.add_argument('--reason', default=None, help='Exit reason override (e.g., DECAY_EXIT)')

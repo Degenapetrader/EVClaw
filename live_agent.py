@@ -1072,6 +1072,7 @@ async def _process_candidates_impl(
         "run_db_call": _run_db_call,
         "find_symbol_data": find_symbol_data,
         "derive_prices_from_symbol_data": derive_prices_from_symbol_data,
+        "normalize_venue": normalize_venue,
         "venues_for_symbol": venues_for_symbol,
         "check_symbol_on_venues": check_symbol_on_venues,
         "apply_exit_cooldown": _apply_exit_cooldown,

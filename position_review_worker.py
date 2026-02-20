@@ -510,7 +510,7 @@ def _bucket_review_candidates(
         elif is_deadly:
             deadly_loser.append(c)
 
-        venue_key = str(c.trade.venue or "").lower()
+        venue_key = normalize_venue(c.trade.venue or "")
         try:
             eq_for_venue = equity_by_venue.get(venue_key) if isinstance(equity_by_venue, dict) else equity
             net_for_venue = net_by_venue.get(venue_key) if isinstance(net_by_venue, dict) else net

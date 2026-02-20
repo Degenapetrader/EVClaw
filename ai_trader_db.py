@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from proposal_status import can_transition_proposal_status, normalize_proposal_status
 from env_utils import EVCLAW_DB_PATH
+from venues import normalize_venue
 
 
 
@@ -1921,6 +1922,7 @@ class AITraderDB:
             trade_id
         """
         notional_usd = entry_price * size
+        venue_norm = normalize_venue(str(venue or "").strip().lower()) or str(venue or "").strip().lower() or "lighter"
 
         with self._get_connection() as conn:
             try:
@@ -1936,7 +1938,7 @@ class AITraderDB:
                 """, (
                     symbol.upper(),
                     direction.upper(),
-                    venue,
+                    venue_norm,
                     time.time(),
                     entry_price,
                     size,
@@ -1974,12 +1976,12 @@ class AITraderDB:
                     ORDER BY entry_time DESC
                     LIMIT 1
                     """,
-                    (symbol.upper(), venue),
+                    (symbol.upper(), venue_norm),
                 ).fetchone()
                 if row:
                     trade_id = int(row[0])
                     self.log.warning(
-                        f"Duplicate open trade prevented for {symbol} on {venue}; "
+                        f"Duplicate open trade prevented for {symbol} on {venue_norm}; "
                         f"reusing trade_id={trade_id} without overwriting entry fields"
                     )
                 else:
@@ -1999,7 +2001,7 @@ class AITraderDB:
                 entry_gate = dict(entry_gate) if isinstance(entry_gate, dict) else {}
                 gate_raw = entry_gate.get("gate_decision_id") or entry_gate.get("decision_id")
                 proposal_raw = entry_gate.get("proposal_id")
-                venue_raw = entry_gate.get("venue") or venue
+                venue_raw = entry_gate.get("venue") or venue_norm
                 if gate_raw is not None:
                     try:
                         gate_decision_id = int(gate_raw)
@@ -2010,7 +2012,7 @@ class AITraderDB:
                         proposal_id = int(proposal_raw)
                     except Exception:
                         proposal_id = None
-                gate_venue = str(venue_raw or "").lower() or None
+                gate_venue = normalize_venue(str(venue_raw or "").lower()) or None
         except Exception:
             gate_decision_id = None
             proposal_id = None
@@ -2257,7 +2259,7 @@ class AITraderDB:
         now = time.time()
         exp = now + float(ttl_seconds or 0)
         sym = str(symbol or "").upper()
-        ven = str(venue or "").lower()
+        ven = normalize_venue(venue or "")
         if not sym or not ven:
             return False
 
@@ -2294,7 +2296,7 @@ class AITraderDB:
 
     def release_symbol_lock(self, symbol: str, venue: str, owner: Optional[str] = None) -> bool:
         sym = str(symbol or "").upper()
-        ven = str(venue or "").lower()
+        ven = normalize_venue(venue or "")
         if not sym or not ven:
             return False
 
@@ -2314,7 +2316,7 @@ class AITraderDB:
 
     def get_symbol_lock(self, symbol: str, venue: str) -> Optional[Dict[str, Any]]:
         sym = str(symbol or "").upper()
-        ven = str(venue or "").lower()
+        ven = normalize_venue(venue or "")
         if not sym or not ven:
             return None
 
@@ -2462,7 +2464,7 @@ class AITraderDB:
                 (
                     ts_val,
                     symbol.upper(),
-                    str(venue or "").lower(),
+                    normalize_venue(venue or ""),
                     trade_id,
                     (db_direction or None),
                     (live_direction or None),
@@ -2502,7 +2504,7 @@ class AITraderDB:
         """
         ts_val = float(ts or time.time())
         sym = symbol.upper()
-        ven = str(venue or "").lower()
+        ven = normalize_venue(venue or "")
         act = str(action or "").upper()
         rsn = str(reason).upper() if reason else None
         det = str(detail or "")
@@ -2602,7 +2604,7 @@ class AITraderDB:
                     (int(source_plan_id) if source_plan_id is not None else None),
                     int(trade_id),
                     str(symbol or "").upper(),
-                    str(venue or "").lower(),
+                    normalize_venue(venue or ""),
                     str(action or "").upper(),
                     str(outcome_kind or "").upper(),
                     int(horizon_sec),
@@ -3003,7 +3005,7 @@ class AITraderDB:
     ) -> Optional[Dict[str, Any]]:
         """Return nearest FILLED pending order metadata for symbol/venue."""
         sym = str(symbol or "").strip().upper()
-        ven = str(venue or "").strip().lower()
+        ven = normalize_venue(venue or "")
         if not sym or not ven:
             return None
 
@@ -3072,7 +3074,7 @@ class AITraderDB:
     ) -> Optional[Dict[str, Any]]:
         """Return nearest EXECUTED/FAILED proposal metadata for symbol/venue."""
         sym = str(symbol or "").strip().upper()
-        ven = str(venue or "").strip().lower()
+        ven = normalize_venue(venue or "")
         if not sym or not ven:
             return None
 
@@ -3746,7 +3748,7 @@ class AITraderDB:
                 """,
                 (
                     int(proposal_id),
-                    str(venue or "").lower() or None,
+                    normalize_venue(venue or "") or None,
                     int(gate_decision_id),
                 ),
             )
@@ -3860,7 +3862,7 @@ class AITraderDB:
             else:
                 outcome_status = "FLAT"
 
-            resolved_venue = str(ctx_venue or trade["venue"] or "").lower() or None
+            resolved_venue = normalize_venue(ctx_venue or trade["venue"] or "") or None
 
             cursor = conn.execute(
                 """
@@ -4116,7 +4118,7 @@ class AITraderDB:
                 (
                     int(trade_id) if trade_id is not None else None,
                     str(symbol or "").upper(),
-                    str(venue or "").lower() or None,
+                    normalize_venue(venue or "") or None,
                     leg_norm,
                     int(attempts),
                     last_error,
@@ -4173,7 +4175,7 @@ class AITraderDB:
         venue_key = str(venue or "").lower()
         if venue_key in ("hyperliquid", "hl"):
             return snapshot.get("hl_equity")
-        if venue_key in ("hip3", "hl_wallet", "wallet"):
+        if venue_key in ("hip3", "hl_wallet", "wallet", "hyperliquid_wallet"):
             return snapshot.get("hl_wallet_equity") or snapshot.get("hip3_equity")
         if venue_key in ("lighter", "lt"):
             return snapshot.get("lighter_equity")
@@ -4716,7 +4718,7 @@ class AITraderDB:
                     int(trade_id),
                     str(symbol or "").upper(),
                     str(direction or "").upper() if direction else None,
-                    str(venue or "").lower() if venue else None,
+                    normalize_venue(venue or "") if venue else None,
                     float(closed_at),
                     float(conviction) if conviction is not None else None,
                     str(order_type) if order_type is not None else None,
@@ -5110,7 +5112,7 @@ class AITraderDB:
 
         symbol_norm = str(item.get("symbol") or "").upper()
         is_hip3 = symbol_norm.startswith("XYZ:")
-        venue_norm = str(item.get("venue") or "").lower() or None
+        venue_norm = normalize_venue(item.get("venue") or "") or None
 
         risk_obj = ctx_obj.get("risk") if isinstance(ctx_obj, dict) and isinstance(ctx_obj.get("risk"), dict) else {}
         gate_obj = ctx_obj.get("entry_gate") if isinstance(ctx_obj, dict) and isinstance(ctx_obj.get("entry_gate"), dict) else {}

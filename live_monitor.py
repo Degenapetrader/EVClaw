@@ -24,6 +24,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from dotenv import load_dotenv
 
 from exchanges import HyperliquidAdapter, LighterAdapter, Position
+from venues import normalize_venue
 
 # Reuse skill.yaml config parsing for venue enable flags
 from cli import load_config, build_execution_config
@@ -181,7 +182,8 @@ def load_tracking_positions(db_path: Path) -> Dict[str, Dict[str, Any]]:
         open_trades = db.get_open_trades()
         positions: Dict[str, Dict[str, Any]] = {}
         for trade in open_trades:
-            key = f"{trade.symbol.upper()}::{str(trade.venue or '').lower()}::{int(trade.id)}"
+            venue_key = normalize_venue(trade.venue or "") or str(trade.venue or "").lower()
+            key = f"{trade.symbol.upper()}::{venue_key}::{int(trade.id)}"
             positions[key] = {
                 "trade_id": int(trade.id),
                 "symbol": trade.symbol,
@@ -196,7 +198,7 @@ def load_tracking_positions(db_path: Path) -> Dict[str, Dict[str, Any]]:
                 "tp_order_id": trade.tp_order_id,
                 "opened_at": datetime.fromtimestamp(trade.entry_time, tz=timezone.utc).isoformat(),
                 "signals_agreeing": trade.get_signals_agreed_list(),
-                "venue": trade.venue,
+                "venue": venue_key,
             }
         return positions
     except Exception:

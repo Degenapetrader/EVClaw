@@ -17,12 +17,13 @@ import requests
 
 from ai_trader_db import AITraderDB
 from adaptive_sltp import AdaptiveSLTPConfig, AdaptiveSLTPManager
-from exchanges import VENUE_HYPERLIQUID, VENUE_HYPERLIQUID_WALLET, VENUE_LIGHTER
+from exchanges import VENUE_HYPERLIQUID, VENUE_LIGHTER
 from executor import Executor
 from live_agent_deps import LiveAgentDeps
 from symbol_rr_learning import HybridSLTPAdapter
 from trade_tracker import TradeTracker
 from env_utils import env_str
+from venues import normalize_venue
 
 HEARTBEAT_FILE = Path("/tmp/evclaw_fill_reconciler_heartbeat.json")
 
@@ -431,12 +432,10 @@ async def check_positions_reconciled(
         return False, f"failed to load open trades: {exc}"
 
     exchange_positions: Dict[Tuple[str, str], str] = {}
-    allowed_set = {v.lower() for v in allowed_venues} if allowed_venues else None
+    allowed_set = {normalize_venue(v) for v in allowed_venues if normalize_venue(v)} if allowed_venues else None
     venues: List[Tuple[str, Any]] = []
     if executor.config.lighter_enabled and (allowed_set is None or VENUE_LIGHTER in allowed_set):
         venues.append((VENUE_LIGHTER, executor.lighter))
-    if executor.config.hl_enabled and (allowed_set is None or VENUE_HYPERLIQUID in allowed_set):
-        venues.append((VENUE_HYPERLIQUID, executor.hyperliquid))
     if executor.config.hl_enabled and (allowed_set is None or VENUE_HYPERLIQUID in allowed_set):
         venues.append((VENUE_HYPERLIQUID, executor.hyperliquid))
 
@@ -453,7 +452,7 @@ async def check_positions_reconciled(
     missing: List[str] = []
     direction_mismatch: List[str] = []
     for trade in db_trades:
-        venue = (trade.venue or "").lower()
+        venue = normalize_venue(trade.venue or "")
         if allowed_set is not None and venue not in allowed_set:
             continue
         key = (venue, trade.symbol.upper())
@@ -469,9 +468,9 @@ async def check_positions_reconciled(
 
     extras: List[str] = []
     db_keys = {
-        ((t.venue or "").lower(), t.symbol.upper())
+        (normalize_venue(t.venue or ""), t.symbol.upper())
         for t in db_trades
-        if allowed_set is None or (t.venue or "").lower() in allowed_set
+        if allowed_set is None or normalize_venue(t.venue or "") in allowed_set
     }
     db_symbols_any_venue = {t.symbol.upper() for t in db_trades if t.symbol and ":" in t.symbol}
     for key in exchange_positions.keys():

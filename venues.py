@@ -11,8 +11,10 @@ VENUE_LIGHTER = "lighter"
 
 _ALIASES = {
     "hl_wallet": VENUE_HYPERLIQUID,
+    "hip3_wallet": VENUE_HYPERLIQUID,
     "hip3": VENUE_HYPERLIQUID,
     "wallet": VENUE_HYPERLIQUID,
+    "hyperliquid_wallet": VENUE_HYPERLIQUID,
     "lighter_wallet": VENUE_LIGHTER,
     # Allow canonical values to pass through unchanged.
     VENUE_HYPERLIQUID: VENUE_HYPERLIQUID,

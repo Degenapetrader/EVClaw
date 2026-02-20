@@ -119,6 +119,7 @@ async def process_candidates_impl(
     _run_db_call = api.run_db_call
     find_symbol_data = api.find_symbol_data
     derive_prices_from_symbol_data = api.derive_prices_from_symbol_data
+    _normalize_venue = getattr(api, "normalize_venue", lambda v: str(v or "").strip().lower())
     venues_for_symbol = api.venues_for_symbol
     check_symbol_on_venues = api.check_symbol_on_venues
     _apply_exit_cooldown = api.apply_exit_cooldown
@@ -1607,7 +1608,8 @@ async def process_candidates_impl(
             opposite_pos = None
             dust_notional = float(getattr(exec_config, "dust_notional_usd", 0.0) or 0.0)
             for pos in existing.values():
-                if pos.venue and pos.venue not in active_venues:
+                pos_venue = _normalize_venue(pos.venue or "")
+                if pos_venue and pos_venue not in active_venues:
                     continue
                 if (pos.state or "").upper() == "DUST":
                     continue
@@ -1618,7 +1620,6 @@ async def process_candidates_impl(
                     continue
 
                 pos_dir = (pos.direction or "").upper()
-                pos_venue = (pos.venue or "").lower()
                 if pos_dir == direction and pos_venue in candidate_venues:
                     same_dir_venues.add(pos_venue)
                 if pos_dir in ("LONG", "SHORT") and pos_dir != direction:

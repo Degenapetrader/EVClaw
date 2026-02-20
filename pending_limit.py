@@ -20,6 +20,7 @@ import time
 import logging
 from pathlib import Path
 from env_utils import EVCLAW_RUNTIME_DIR
+from venues import normalize_venue
 
 SR_BROKEN_LONG_MULT = 0.995
 SR_BROKEN_SHORT_MULT = 1.005
@@ -114,7 +115,7 @@ class PendingLimitManager:
 
     @staticmethod
     def _k(symbol: str, venue: str) -> Tuple[str, str]:
-        return (str(symbol or "").strip().upper(), str(venue or "").strip().lower())
+        return (str(symbol or "").strip().upper(), normalize_venue(venue or ""))
 
     def _acquire_lock(self, timeout_sec: float) -> Optional[object]:
         """Acquire the shared SR_LIMIT lock.
@@ -247,8 +248,8 @@ class PendingLimitManager:
             return False
 
         # Caps are enforced per-venue (equity pool differs between perps vs wallet).
-        venue_norm = str(venue or "").strip().lower()
-        pending_same_venue = [p for p in self._pending.values() if str(p.venue).strip().lower() == venue_norm]
+        venue_norm = normalize_venue(venue or "")
+        pending_same_venue = [p for p in self._pending.values() if normalize_venue(p.venue) == venue_norm]
 
         max_pending = int(self.cfg.get("sr_limit_max_pending", 2) or 2)
         if len(pending_same_venue) >= max_pending:

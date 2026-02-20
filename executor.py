@@ -1157,7 +1157,10 @@ class Executor:
 
         for trade in unprotected:
             symbol = trade.symbol
-            venue = trade.venue
+            raw_venue = trade.venue
+            venue = normalize_venue(raw_venue)
+            if not venue:
+                venue = str(raw_venue or "")
             direction = trade.direction
             entry_price = trade.entry_price
             size = trade.size
@@ -1175,7 +1178,10 @@ class Executor:
                 adapter = self.hyperliquid
 
             if not adapter or not getattr(adapter, "_initialized", False):
-                self.log.warning(f"Adapter for {venue} not available, skipping protection for trade {trade_id}")
+                self.log.warning(
+                    f"Adapter for {venue} not available (raw_venue={raw_venue}), "
+                    f"skipping protection for trade {trade_id}"
+                )
                 continue
 
             # Get ATR for SL/TP calculation

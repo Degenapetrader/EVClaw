@@ -17,6 +17,7 @@ from venues import (
 
 def test_normalize_venue_aliases() -> None:
     assert normalize_venue("hl_wallet") == VENUE_HYPERLIQUID_WALLET
+    assert normalize_venue("hyperliquid_wallet") == VENUE_HYPERLIQUID
     assert normalize_venue("lighter_wallet") == VENUE_LIGHTER
     assert normalize_venue("hyperliquid") == VENUE_HYPERLIQUID
 

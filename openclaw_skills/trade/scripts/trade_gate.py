@@ -32,6 +32,8 @@ EVCLAW_ROOT_STR = str(EVCLAW_ROOT)
 if EVCLAW_ROOT_STR not in sys.path:
     sys.path.insert(0, EVCLAW_ROOT_STR)
 
+from venues import normalize_venue
+
 from openclaw_agent_client import openclaw_agent_turn, safe_json_loads  # type: ignore
 
 
@@ -178,7 +180,7 @@ def _normalize_plan(plan: Dict[str, Any], *, meta: Dict[str, Any]) -> Dict[str, 
 
     display_id = str(meta.get("display_id") or "").strip().upper()
     symbol = str(meta.get("symbol") or "").strip().upper()
-    venue = str(meta.get("venue") or "hyperliquid").strip().lower() or "hyperliquid"
+    venue = normalize_venue(meta.get("venue") or "hyperliquid") or "hyperliquid"
 
     out["display_id"] = display_id
     out["symbol"] = symbol
@@ -415,7 +417,7 @@ async def run_trade_gate(
         fallback = {
             "display_id": str(m.get("display_id") or "").upper(),
             "symbol": sym,
-            "venue": str(m.get("venue") or "hyperliquid").lower(),
+            "venue": normalize_venue(m.get("venue") or "hyperliquid") or "hyperliquid",
             "direction_idea": str(m.get("direction_hint") or "LONG").upper(),
             "confidence_pct": int(m.get("confidence_pct") or 50),
             "size_usd": float(m.get("recommended_size_usd") or 0.0),

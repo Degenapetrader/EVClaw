@@ -65,10 +65,12 @@ async def _fetch_current_prices(executor: Executor, symbol: str, venue: Optional
     try:
         ven = normalize_venue(venue) if venue else None
         adapter = None
-        if ven == 'hyperliquid':
-            adapter = getattr(executor, 'hyperliquid', None) or getattr(executor, '_hl_adapter', None)
-        elif ven == 'hyperliquid_wallet':
-            adapter = getattr(executor, 'hyperliquid_wallet', None)
+        if ven in ('hyperliquid', 'hip3', 'hl_wallet', 'wallet', 'hyperliquid_wallet'):
+            adapter = (
+                getattr(executor, 'hyperliquid', None)
+                or getattr(executor, 'hyperliquid_wallet', None)
+                or getattr(executor, '_hl_adapter', None)
+            )
         elif ven == 'lighter':
             adapter = getattr(executor, 'lighter', None) or getattr(executor, '_lighter_adapter', None)
         elif hasattr(executor, 'router'):
@@ -222,10 +224,8 @@ async def _execute_limit(plan: Dict[str, Any], *, db_path: str, ttl_override_sec
             raise RuntimeError('pending sr_limit manager disabled')
 
         adapter = None
-        if venue == 'hyperliquid':
-            adapter = getattr(executor, 'hyperliquid', None)
-        elif venue == 'hyperliquid_wallet':
-            adapter = getattr(executor, 'hyperliquid_wallet', None)
+        if venue in ('hyperliquid', 'hip3', 'hl_wallet', 'wallet', 'hyperliquid_wallet'):
+            adapter = getattr(executor, 'hyperliquid', None) or getattr(executor, 'hyperliquid_wallet', None)
         elif venue == 'lighter':
             adapter = getattr(executor, 'lighter', None)
         if adapter is None:

@@ -395,7 +395,7 @@ async def main() -> int:
         "--venue",
         choices=[
             "lighter", "hyperliquid", "hip3",
-            "hl_wallet", "lighter_wallet",
+            "hl_wallet", "hyperliquid_wallet", "lighter_wallet",
             "all",
         ],
         default="all",
