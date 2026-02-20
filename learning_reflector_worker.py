@@ -361,7 +361,8 @@ async def process_one_task(
         _meta, out = await _call_agent_json(
             agent_id=agent_id,
             thinking=thinking,
-            session_id=f"reflect:{trade_id}:{int(time.time()*1000)}",
+            # OpenClaw session IDs must avoid ':' characters.
+            session_id=f"reflect_{trade_id}_{int(time.time()*1000)}",
             message=prompt,
             timeout_sec=_reflector_timeout_sec(),
         )
@@ -411,7 +412,8 @@ async def process_one_task(
                 _m2, concl = await _call_agent_json(
                     agent_id=agent_id,
                     thinking=thinking,
-                    session_id=f"concl:{sym}:{int(time.time()*1000)}",
+                    # OpenClaw session IDs must avoid ':' characters.
+                    session_id=f"concl_{sym}_{int(time.time()*1000)}",
                     message=concl_prompt,
                     timeout_sec=_reflector_timeout_sec(),
                 )

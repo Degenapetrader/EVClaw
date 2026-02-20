@@ -5172,7 +5172,9 @@ class AITraderDB:
         equity_at_entry = item.get("equity_at_entry")
         pnl_r: Optional[float] = None
         try:
-            denom = float(equity_at_entry) * float(risk_pct_used)
+            # risk_pct_used is stored as percent points (e.g. 1.0 == 1%),
+            # so convert to fractional risk before computing R-multiple.
+            denom = float(equity_at_entry) * (float(risk_pct_used) / 100.0)
             if denom > 0 and pnl_usd is not None:
                 pnl_r = float(pnl_usd) / denom
         except Exception:
