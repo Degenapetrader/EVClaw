@@ -182,7 +182,11 @@ def load_tracking_positions(db_path: Path) -> Dict[str, Dict[str, Any]]:
         open_trades = db.get_open_trades()
         positions: Dict[str, Dict[str, Any]] = {}
         for trade in open_trades:
-            venue_key = normalize_venue(trade.venue or "") or str(trade.venue or "").lower()
+            venue_raw = str(trade.venue or "").strip().lower()
+            if venue_raw in ("hip3", "hip3_wallet", "hl_wallet", "wallet", "hyperliquid_wallet"):
+                venue_key = "hip3"
+            else:
+                venue_key = normalize_venue(venue_raw) or venue_raw
             key = f"{trade.symbol.upper()}::{venue_key}::{int(trade.id)}"
             positions[key] = {
                 "trade_id": int(trade.id),

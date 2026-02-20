@@ -1922,7 +1922,12 @@ class AITraderDB:
             trade_id
         """
         notional_usd = entry_price * size
-        venue_norm = normalize_venue(str(venue or "").strip().lower()) or str(venue or "").strip().lower() or "lighter"
+        venue_raw = str(venue or "").strip().lower()
+        if venue_raw in ("hip3", "hip3_wallet", "hl_wallet", "wallet", "hyperliquid_wallet"):
+            # Keep HIP3/wallet entries distinct from perps "hyperliquid" rows.
+            venue_norm = "hip3"
+        else:
+            venue_norm = normalize_venue(venue_raw) or venue_raw or "lighter"
 
         with self._get_connection() as conn:
             try:
@@ -2012,7 +2017,11 @@ class AITraderDB:
                         proposal_id = int(proposal_raw)
                     except Exception:
                         proposal_id = None
-                gate_venue = normalize_venue(str(venue_raw or "").lower()) or None
+                gate_venue_raw = str(venue_raw or "").strip().lower()
+                if gate_venue_raw in ("hip3", "hip3_wallet", "hl_wallet", "wallet", "hyperliquid_wallet"):
+                    gate_venue = "hip3"
+                else:
+                    gate_venue = normalize_venue(gate_venue_raw) or None
         except Exception:
             gate_decision_id = None
             proposal_id = None
