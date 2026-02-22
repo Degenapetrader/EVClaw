@@ -62,9 +62,9 @@ Core learning state is carried in `learning_state_kv` (`patterns`/`adjustments`)
 `symbol_policy` rows are optional and can be empty depending on source history/release.
 
 Release seed URL:
-- `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v2-20260220`
+- `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v3-20260222`
 
-Current official release seed note (v2, 2026-02-20):
+Current official release seed note (v3, 2026-02-22):
 - `learning_state_kv`: populated
 - `symbol_policy`: populated
 
@@ -95,6 +95,10 @@ For OpenClaw agents:
 - Require user approval first.
 - Run dry-run command first.
 - Only run `--apply` after user confirms.
+- Maintainer regeneration tool:
+  - `python3 "$EVCLAW_ROOT/scripts/regenerate_symbol_conclusions_v2.py" --dry-run`
+  - `python3 "$EVCLAW_ROOT/scripts/regenerate_symbol_conclusions_v2.py" --apply`
+  - If `--model` is omitted, OpenClaw agent routing decides model.
 
 Pros:
 - Better trading knowledge from real trade history.

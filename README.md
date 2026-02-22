@@ -90,15 +90,19 @@ python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py" --apply
 ```
 
-Current official release seed note (v1, 2026-02-16):
+Current official release seed note (v3, 2026-02-22):
 - `learning_state_kv`: populated
-- `symbol_policy`: `0` rows (expected for this version)
+- `symbol_policy`: populated
 
 OpenClaw agent instruction:
 - Ask for explicit user consent before importing learning seed.
 - Run dry-run first.
 - Run `--apply` only after user confirms.
 - If using a custom seed file instead of official release, pass `--seed /path/to/seed.tgz`.
+- Maintainer-only regeneration tool:
+  - `python3 "$EVCLAW_ROOT/scripts/regenerate_symbol_conclusions_v2.py" --dry-run`
+  - `python3 "$EVCLAW_ROOT/scripts/regenerate_symbol_conclusions_v2.py" --apply`
+  - If `--model` is omitted, OpenClaw agent routing decides model.
 
 Pros:
 - Better trading knowledge from real trade history.
@@ -187,7 +191,7 @@ After bootstrap, these user-facing helper skills are available:
 - `/execute <long|short> <SYMBOL> <chase|limit> [size_usd] [ttl]` (asks missing size and requires explicit confirm)
 - `/best3`
 - `/hedge`
-- `/stats`
+- `/stats` (live perps + builder/HIP3, DB fallback only when live fails)
 
 Command split:
 - `/execute <PLAN_ID> chase|limit` is helper-skill manual plan execution.
