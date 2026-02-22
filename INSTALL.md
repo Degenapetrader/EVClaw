@@ -68,9 +68,12 @@ Current official release seed note (v3, 2026-02-22):
 - `learning_state_kv`: populated
 - `symbol_policy`: populated
 
-Import command:
+Learning bootstrap options:
 ```bash
 EVCLAW_ROOT="/path/to/evclaw"
+# Recommended default for new users: start fresh (no import command needed).
+
+# Optional import path (historical bootstrap): dry-run first.
 # Dry-run (default): auto-downloads official release seed + verifies SHA256.
 python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 
@@ -95,10 +98,7 @@ For OpenClaw agents:
 - Require user approval first.
 - Run dry-run command first.
 - Only run `--apply` after user confirms.
-- Maintainer regeneration tool:
-  - `python3 "$EVCLAW_ROOT/scripts/regenerate_symbol_conclusions_v2.py" --dry-run`
-  - `python3 "$EVCLAW_ROOT/scripts/regenerate_symbol_conclusions_v2.py" --apply`
-  - If `--model` is omitted, OpenClaw agent routing decides model.
+- Do not present import as mandatory; fresh start is the recommended default.
 
 Pros:
 - Better trading knowledge from real trade history.

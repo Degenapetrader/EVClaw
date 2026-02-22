@@ -77,12 +77,15 @@ Use it only when the user explicitly agrees.
 Core learning state imports from `learning_state_kv` (`patterns`/`adjustments`), not a `pattern_stats` SQL table.
 `symbol_policy` rows are optional and may be empty depending on source history/release.
 
-Seed publishing is maintainer-managed; end users only need the import flow below.
+Seed publishing is maintainer-managed. For most users, start fresh and do not import.
 
-User side (import into EVClaw from release):
+User side options:
 
 ```bash
 EVCLAW_ROOT="/path/to/EVClaw"
+# Recommended default for new users: start fresh (no import command needed).
+
+# Optional import path (historical bootstrap): dry-run first.
 # Dry-run (default): auto-downloads official release seed + verifies SHA256.
 python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 
@@ -99,10 +102,7 @@ OpenClaw agent instruction:
 - Run dry-run first.
 - Run `--apply` only after user confirms.
 - If using a custom seed file instead of official release, pass `--seed /path/to/seed.tgz`.
-- Maintainer-only regeneration tool:
-  - `python3 "$EVCLAW_ROOT/scripts/regenerate_symbol_conclusions_v2.py" --dry-run`
-  - `python3 "$EVCLAW_ROOT/scripts/regenerate_symbol_conclusions_v2.py" --apply`
-  - If `--model` is omitted, OpenClaw agent routing decides model.
+- Do not present import as mandatory; fresh start is the recommended default.
 
 Pros:
 - Better trading knowledge from real trade history.
