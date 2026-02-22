@@ -128,8 +128,11 @@ def _hl_clearinghouse_state(user: str, dex: Optional[str] = None) -> Dict[str, A
     return out if isinstance(out, dict) else {}
 
 
-def _hl_open_orders(user: str) -> List[Dict[str, Any]]:
-    out = _hl_post({"type": "openOrders", "user": user})
+def _hl_open_orders(user: str, dex: Optional[str] = None) -> List[Dict[str, Any]]:
+    payload: Dict[str, Any] = {"type": "openOrders", "user": user}
+    if dex:
+        payload["dex"] = str(dex).strip().lower()
+    out = _hl_post(payload)
     return out if isinstance(out, list) else []
 
 
@@ -162,6 +165,52 @@ class LivePosition:
     notional: float
     direction: str
     unrealized_pnl: Optional[float]
+
+
+def _split_csv(raw: Optional[str]) -> List[str]:
+    txt = str(raw or "").strip()
+    if not txt:
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for part in txt.split(","):
+        v = str(part or "").strip().lower()
+        if not v or v in seen:
+            continue
+        seen.add(v)
+        out.append(v)
+    return out
+
+
+def _hip3_dexes() -> List[str]:
+    raw = (
+        os.getenv("EVCLAW_HIP3_DEXES")
+        or _dotenv_get(DOTENV_PATH, "EVCLAW_HIP3_DEXES")
+        or "xyz"
+    )
+    vals = _split_csv(raw)
+    return vals if vals else ["xyz"]
+
+
+def _builder_symbol(dex: str, symbol: str) -> str:
+    s = str(symbol or "").strip().upper()
+    if not s:
+        return s
+    if ":" in s:
+        return s
+    d = str(dex or "").strip().upper()
+    if not d:
+        d = "XYZ"
+    return f"{d}:{s}"
+
+
+def _dedupe_positions(rows: List[LivePosition]) -> List[LivePosition]:
+    pos_map: Dict[Tuple[str, str], LivePosition] = {}
+    for p in rows:
+        k = (p.symbol, p.direction)
+        if k not in pos_map or p.notional > pos_map[k].notional:
+            pos_map[k] = p
+    return sorted(pos_map.values(), key=lambda p: p.notional, reverse=True)
 
 
 def _parse_positions(state: Dict[str, Any], mids: Dict[str, float]) -> List[LivePosition]:
@@ -302,44 +351,65 @@ def main() -> int:
     live_err = None
     mids: Dict[str, float] = {}
 
-    accounts: List[Tuple[str, str]] = [("wallet", wallet)]
+    builder_dexes = _hip3_dexes()
+    accounts: List[Tuple[str, str, Optional[str]]] = [("perps_main", wallet, None)]
+    for dex in builder_dexes:
+        accounts.append((f"builder_{dex}", wallet, dex))
 
-    all_positions: List[LivePosition] = []
+    perps_positions_raw: List[LivePosition] = []
+    builder_positions_raw: List[LivePosition] = []
     all_open_orders: List[Dict[str, Any]] = []
-    equity_by_acct: Dict[str, float] = {}
+    equity_main: Optional[float] = None
+    equity_builder_by_dex: Dict[str, float] = {}
 
     try:
         mids = _hl_all_mids()
-        for label, addr in accounts:
-            st = _hl_clearinghouse_state(addr)
+        for label, addr, dex in accounts:
+            st = _hl_clearinghouse_state(addr, dex=dex)
             try:
                 ms = st.get("marginSummary") if isinstance(st.get("marginSummary"), dict) else {}
                 if ms.get("accountValue") is not None:
-                    equity_by_acct[label] = float(ms.get("accountValue"))
+                    val = float(ms.get("accountValue"))
+                    if dex:
+                        equity_builder_by_dex[str(dex)] = val
+                    else:
+                        equity_main = val
             except Exception:
                 pass
             try:
-                all_positions.extend(_parse_positions(st, mids))
+                parsed = _parse_positions(st, mids)
+                if dex:
+                    for p in parsed:
+                        p.symbol = _builder_symbol(str(dex), p.symbol)
+                    builder_positions_raw.extend(parsed)
+                else:
+                    perps_positions_raw.extend(parsed)
             except Exception:
                 pass
             try:
-                all_open_orders.extend(_hl_open_orders(addr))
+                all_open_orders.extend(_hl_open_orders(addr, dex=dex))
             except Exception:
                 pass
     except Exception as e:
         live_err = str(e)
 
-    # De-dup positions by (symbol,direction): keep max notional
-    pos_map: Dict[Tuple[str, str], LivePosition] = {}
-    for p in all_positions:
-        k = (p.symbol, p.direction)
-        if k not in pos_map or p.notional > pos_map[k].notional:
-            pos_map[k] = p
-    positions = sorted(pos_map.values(), key=lambda p: p.notional, reverse=True)
+    positions_perps = _dedupe_positions(perps_positions_raw)
+    positions_builder = _dedupe_positions(builder_positions_raw)
+    positions = _dedupe_positions(positions_perps + positions_builder)
 
-    equity = float(sum(equity_by_acct.values())) if equity_by_acct else None
+    net_perps, long_perps, short_perps = _sum_exposure(positions_perps)
+    net_builder, long_builder, short_builder = _sum_exposure(positions_builder)
+    net = float(net_perps + net_builder)
+    long_notional = float(long_perps + long_builder)
+    short_notional = float(short_perps + short_builder)
 
-    net, long_notional, short_notional = _sum_exposure(positions)
+    equity_builder_total: Optional[float] = None
+    if equity_builder_by_dex:
+        equity_builder_total = float(sum(equity_builder_by_dex.values()))
+    equity_total_safe: Optional[float] = None
+    if equity_main is not None and (not equity_builder_by_dex):
+        equity_total_safe = float(equity_main)
+
     # NOTE: We no longer surface SL/TP presence as a warning in /stats output.
     missing_sltp: List[str] = []
 
@@ -370,9 +440,11 @@ def main() -> int:
         pass
 
     # If live fetch produced no usable state, fallback to DB/context snapshot.
-    if (equity is None or equity <= 0) and db_fallback_equity and db_fallback_equity > 0:
+    if (equity_main is None or equity_main <= 0) and db_fallback_equity and db_fallback_equity > 0:
         live_err = live_err or "no_live_equity"
-        equity = db_fallback_equity
+        equity_main = db_fallback_equity
+        if equity_total_safe is None and not equity_builder_by_dex:
+            equity_total_safe = float(db_fallback_equity)
 
     if (not positions) and db_fallback_net is not None:
         # We can't rebuild live positions safely; but at least reflect net exposure.
@@ -385,13 +457,27 @@ def main() -> int:
     lines.append("Wallet stats")
     lines.append(f"- Wallet: {wallet[:6]}…{wallet[-4:]}")
 
-    if equity is not None:
-        lines.append(f"- Equity (HL, live): {_fmt_usd(float(equity))}")
+    if equity_main is not None:
+        lines.append(f"- Equity (HL perps, live): {_fmt_usd(float(equity_main))}")
     else:
-        lines.append("- Equity (HL, live): unavailable")
+        lines.append("- Equity (HL perps, live): unavailable")
+
+    if equity_builder_by_dex:
+        pairs = []
+        for dex in sorted(equity_builder_by_dex.keys()):
+            pairs.append(f"{dex}={_fmt_usd(float(equity_builder_by_dex[dex]))}")
+        lines.append(f"- Equity (Builder dex, live): {' | '.join(pairs)}")
+    else:
+        lines.append("- Equity (Builder dex, live): unavailable/none")
 
     lines.append(
-        f"- Exposure (HL): net {_fmt_usd(net)} | long {_fmt_usd(long_notional)} | short {_fmt_usd(short_notional)}"
+        f"- Exposure (combined): net {_fmt_usd(net)} | long {_fmt_usd(long_notional)} | short {_fmt_usd(short_notional)}"
+    )
+    lines.append(
+        f"- Exposure (perps): net {_fmt_usd(net_perps)} | long {_fmt_usd(long_perps)} | short {_fmt_usd(short_perps)}"
+    )
+    lines.append(
+        f"- Exposure (builder): net {_fmt_usd(net_builder)} | long {_fmt_usd(long_builder)} | short {_fmt_usd(short_builder)}"
     )
 
     # 24h account volume (live): sum(|px*sz|) from userFillsByTime for wallet.
@@ -400,18 +486,17 @@ def main() -> int:
         end_ms = int(_utc_now() * 1000)
         start_ms = end_ms - int(24 * 60 * 60 * 1000)
         tot = 0.0
-        for _label, addr in accounts:
-            fills = _hl_user_fills_by_time(addr, start_ms=start_ms, end_ms=end_ms, aggregate_by_time=True)
-            for f in fills:
-                if not isinstance(f, dict):
-                    continue
-                try:
-                    px = float(f.get('px') or 0.0)
-                    sz = float(f.get('sz') or 0.0)
-                    if px > 0 and sz != 0:
-                        tot += abs(px * sz)
-                except Exception:
-                    continue
+        fills = _hl_user_fills_by_time(wallet, start_ms=start_ms, end_ms=end_ms, aggregate_by_time=True)
+        for f in fills:
+            if not isinstance(f, dict):
+                continue
+            try:
+                px = float(f.get('px') or 0.0)
+                sz = float(f.get('sz') or 0.0)
+                if px > 0 and sz != 0:
+                    tot += abs(px * sz)
+            except Exception:
+                continue
         vol24_usd = tot
     except Exception:
         vol24_usd = None
@@ -419,14 +504,23 @@ def main() -> int:
     if vol24_usd is not None and vol24_usd > 0:
         lines.append(f"- Volume 24h (account, live): {_fmt_usd(vol24_usd)}")
 
-    if positions:
-        lines.append("Open positions (top)")
-        for p in positions[:8]:
+    if positions_perps:
+        lines.append(f"Perps ({len(positions_perps)})")
+        for p in positions_perps[:8]:
             mid_txt = f"{p.mid:.4f}" if p.mid and p.mid > 0 else "?"
             upnl_txt = _fmt_usd(p.unrealized_pnl) if p.unrealized_pnl is not None else "n/a"
             lines.append(f"- {p.symbol} {p.direction} notional {_fmt_usd(p.notional)} | mid {mid_txt} | uPnL {upnl_txt}")
     else:
-        lines.append("Open positions: none (or live fetch failed)")
+        lines.append("Perps: none")
+
+    if positions_builder:
+        lines.append(f"Builder ({len(positions_builder)})")
+        for p in positions_builder[:8]:
+            mid_txt = f"{p.mid:.4f}" if p.mid and p.mid > 0 else "?"
+            upnl_txt = _fmt_usd(p.unrealized_pnl) if p.unrealized_pnl is not None else "n/a"
+            lines.append(f"- {p.symbol} {p.direction} notional {_fmt_usd(p.notional)} | mid {mid_txt} | uPnL {upnl_txt}")
+    else:
+        lines.append("Builder: none")
 
     # Intentionally omit SL/TP trigger inference (too noisy / schema-dependent).
 
@@ -451,12 +545,20 @@ def main() -> int:
         "live": {
             "ok": bool(live_ok),
             "error": live_err,
-            "equity_hl": equity,
+            "equity_hl": (equity_total_safe if equity_total_safe is not None else equity_main),
+            "equity_main": equity_main,
+            "equity_builder_by_dex": equity_builder_by_dex,
+            "equity_builder_total": equity_builder_total,
+            "equity_total_safe": equity_total_safe,
             "net_notional": net,
+            "net_notional_perps": net_perps,
+            "net_notional_builder": net_builder,
             "long_notional": long_notional,
             "short_notional": short_notional,
             "missing_sltp_symbols": missing_sltp,
             "positions": [p.__dict__ for p in positions],
+            "positions_perps": [p.__dict__ for p in positions_perps],
+            "positions_builder": [p.__dict__ for p in positions_builder],
         },
         "db_fallback": {
             "equity_hl": db_fallback_equity,

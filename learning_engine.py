@@ -13,6 +13,7 @@ Key Features:
 """
 
 import json
+import os
 import threading
 from logging_utils import get_logger
 import sqlite3
@@ -36,10 +37,30 @@ from context_learning import ContextLearningEngine
 @dataclass(frozen=True)
 class LearningConfig:
     avoid_win_rate_threshold: float = float(get_param("learning_engine", "avoid_win_rate_threshold"))
-    avoid_min_trades: int = int(get_param("learning_engine", "avoid_min_trades"))
+    avoid_min_trades: int = max(12, int(get_param("learning_engine", "avoid_min_trades")))
     avoid_duration_hours: float = float(get_param("learning_engine", "avoid_duration_hours"))
+    avoid_half_life_hours: float = max(
+        1.0,
+        float(os.getenv("EVCLAW_LEARNING_AVOID_HALF_LIFE_HOURS", "12")),
+    )
+    avoid_max_hours: float = max(
+        1.0,
+        float(os.getenv("EVCLAW_LEARNING_AVOID_MAX_HOURS", "48")),
+    )
     loss_adjustment_mult: float = 0.98
     win_adjustment_mult: float = 1.02
+    symbol_adjust_min_trades: int = max(
+        1,
+        int(os.getenv("EVCLAW_LEARNING_SYMBOL_ADJUST_MIN_TRADES", "10")),
+    )
+    signal_adjust_min_trades: int = max(
+        1,
+        int(os.getenv("EVCLAW_LEARNING_SIGNAL_ADJUST_MIN_TRADES", "12")),
+    )
+    adjust_step_max: float = max(
+        0.0,
+        float(os.getenv("EVCLAW_LEARNING_ADJUST_STEP_MAX", "0.02")),
+    )
 
 
 LEARNING_CONFIG = LearningConfig()
@@ -133,6 +154,8 @@ class LearningEngine(EnhancedLearningEngine):
     AVOID_WIN_RATE_THRESHOLD = LEARNING_CONFIG.avoid_win_rate_threshold
     AVOID_MIN_TRADES = LEARNING_CONFIG.avoid_min_trades
     AVOID_DURATION_HOURS = LEARNING_CONFIG.avoid_duration_hours
+    AVOID_HALF_LIFE_HOURS = LEARNING_CONFIG.avoid_half_life_hours
+    AVOID_MAX_HOURS = LEARNING_CONFIG.avoid_max_hours
 
     # Adjustment thresholds
     # Unified policy:
@@ -141,6 +164,9 @@ class LearningEngine(EnhancedLearningEngine):
     # - break-even: pnl == 0 (neutral, no reward/penalty)
     LOSS_ADJUSTMENT_MULT = LEARNING_CONFIG.loss_adjustment_mult
     WIN_ADJUSTMENT_MULT = LEARNING_CONFIG.win_adjustment_mult
+    SYMBOL_ADJUST_MIN_TRADES = LEARNING_CONFIG.symbol_adjust_min_trades
+    SIGNAL_ADJUST_MIN_TRADES = LEARNING_CONFIG.signal_adjust_min_trades
+    ADJUST_STEP_MAX = LEARNING_CONFIG.adjust_step_max
 
     def __init__(
         self,
@@ -207,6 +233,86 @@ class LearningEngine(EnhancedLearningEngine):
                 conn.commit()
         except Exception as e:
             self.log.warning(f"Failed to ensure learning_state_kv table: {e}")
+
+    def _bounded_step(self, current: float, target: float) -> float:
+        """Bound a multiplier update to avoid one-step jumps on sparse data."""
+        cur = float(current)
+        tgt = float(target)
+        max_step = max(0.0, float(self.ADJUST_STEP_MAX))
+        if max_step <= 0:
+            return tgt
+        if tgt > cur:
+            return min(tgt, cur + max_step)
+        return max(tgt, cur - max_step)
+
+    def _closed_trades_for_symbol(self, symbol: str) -> int:
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            return 0
+        try:
+            with self._db_conn() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM trades WHERE symbol = ? AND exit_time IS NOT NULL",
+                    (sym,),
+                ).fetchone()
+                return int(row[0] or 0) if row else 0
+        except Exception:
+            return 0
+
+    def _closed_trades_for_signal_direction(self, signal_name: str, direction: str) -> int:
+        sig = str(signal_name or "").strip().upper()
+        dirn = str(direction or "").strip().upper()
+        if not sig or dirn not in {"LONG", "SHORT"}:
+            return 0
+        try:
+            with self._db_conn() as conn:
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='signal_symbol_stats' LIMIT 1"
+                ).fetchone()
+                if exists is None:
+                    return 0
+                row = conn.execute(
+                    """
+                    SELECT COALESCE(SUM(n), 0) AS n
+                    FROM signal_symbol_stats
+                    WHERE signal = ? AND direction = ?
+                    """,
+                    (sig, dirn),
+                ).fetchone()
+                return int(row[0] or 0) if row else 0
+        except Exception:
+            return 0
+
+    def _is_pattern_avoided(self, stats: PatternStats, now_ts: Optional[float] = None) -> bool:
+        """Check/decay active avoidance state with half-life and max TTL safety."""
+        now = float(now_ts if now_ts is not None else time.time())
+        until = float(stats.avoid_until or 0.0)
+        if until <= 0:
+            return False
+
+        max_ttl_sec = max(3600.0, float(self.AVOID_MAX_HOURS) * 3600.0)
+        if (until - now) > max_ttl_sec:
+            until = now + max_ttl_sec
+            stats.avoid_until = until
+
+        remaining = until - now
+        if remaining <= 0:
+            stats.avoid_until = None
+            stats.avoid_reason = ""
+            return False
+
+        half_life_sec = max(3600.0, float(self.AVOID_HALF_LIFE_HOURS) * 3600.0)
+        last = float(stats.last_trade_time or 0.0)
+        if last > 0 and now > last:
+            idle = now - last
+            decay = 0.5 ** (idle / half_life_sec)
+            decayed_remaining = remaining * decay
+            if decayed_remaining < 60.0:
+                stats.avoid_until = None
+                stats.avoid_reason = ""
+                return False
+            stats.avoid_until = now + min(decayed_remaining, max_ttl_sec)
+        return True
 
     def _load_state_from_db(self) -> bool:
         loaded_any = False
@@ -637,11 +743,28 @@ class LearningEngine(EnhancedLearningEngine):
                 stats.avg_hold_hours = total_hours / stats.trades
             stats.last_trade_time = time.time()
 
-            if stats.trades >= self.AVOID_MIN_TRADES and stats.win_rate < self.AVOID_WIN_RATE_THRESHOLD:
-                if not stats.is_avoided:
-                    stats.avoid_until = time.time() + (self.AVOID_DURATION_HOURS * 3600)
+            now = time.time()
+            _ = self._is_pattern_avoided(stats, now_ts=now)
+
+            if stats.trades >= self.AVOID_MIN_TRADES:
+                wr_deficit = max(0.0, float(self.AVOID_WIN_RATE_THRESHOLD) - float(stats.win_rate))
+                sample_w = min(1.0, float(stats.trades) / float(max(1, self.AVOID_MIN_TRADES * 2)))
+                # Expectancy proxy from avg pnl (bounded contribution).
+                pnl_penalty = 0.0
+                if float(stats.avg_pnl) < 0.0:
+                    pnl_penalty = min(0.30, abs(float(stats.avg_pnl)) / 50.0)
+                evidence = (wr_deficit * sample_w) + pnl_penalty
+                if evidence >= 0.12 and not self._is_pattern_avoided(stats, now_ts=now):
+                    dur_hours = max(
+                        1.0,
+                        min(
+                            float(self.AVOID_MAX_HOURS),
+                            float(self.AVOID_DURATION_HOURS) * (0.5 + sample_w),
+                        ),
+                    )
+                    stats.avoid_until = now + (dur_hours * 3600.0)
                     stats.avoid_reason = (
-                        f"Win rate {stats.win_rate:.0%} < {self.AVOID_WIN_RATE_THRESHOLD:.0%}"
+                        f"evidence={evidence:.2f} wr={stats.win_rate:.0%} avg_pnl={stats.avg_pnl:+.2f}"
                     )
                     self.log.warning(f"Avoiding pattern {pattern_key}: {stats.avoid_reason}")
 
@@ -747,7 +870,7 @@ class LearningEngine(EnhancedLearningEngine):
         if not stats:
             return False
 
-        return stats.is_avoided
+        return self._is_pattern_avoided(stats)
 
     # =========================================================================
     # Adaptive Adjustments
@@ -796,23 +919,31 @@ class LearningEngine(EnhancedLearningEngine):
         with self._state_lock:
             # Update symbol adjustment
             symbol = mistake.symbol.upper()
-            current = self._symbol_adjustments.get(symbol, 1.0)
-
-            # Symmetric update policy: 2% penalty on loss.
-            new_mult = max(0.3, current * self.LOSS_ADJUSTMENT_MULT)
-            self._symbol_adjustments[symbol] = new_mult
-
-            self.log.info(f"Symbol {symbol} adjustment (loss): {current:.2f} -> {new_mult:.2f}")
+            symbol_samples = self._closed_trades_for_symbol(symbol)
+            if symbol_samples >= int(self.SYMBOL_ADJUST_MIN_TRADES):
+                current = self._symbol_adjustments.get(symbol, 1.0)
+                target = max(0.3, current * self.LOSS_ADJUSTMENT_MULT)
+                new_mult = self._bounded_step(current, target)
+                self._symbol_adjustments[symbol] = new_mult
+                self.log.info(
+                    f"Symbol {symbol} adjustment (loss): {current:.2f} -> {new_mult:.2f} (n={symbol_samples})"
+                )
 
             # Update signal adjustments based on entry signals (directional: signal:LONG or signal:SHORT)
             for signal, sig_direction in mistake.signals_at_entry.items():
                 if sig_direction == mistake.direction:
                     # This signal agreed with our losing direction - penalize for THIS direction only
                     sig_key = f"{signal.lower()}:{mistake.direction.upper()}"
+                    sig_samples = self._closed_trades_for_signal_direction(signal, mistake.direction)
+                    if sig_samples < int(self.SIGNAL_ADJUST_MIN_TRADES):
+                        continue
                     current = self._signal_adjustments.get(sig_key, 1.0)
-                    new_mult = max(0.5, current * self.LOSS_ADJUSTMENT_MULT)
+                    target = max(0.5, current * self.LOSS_ADJUSTMENT_MULT)
+                    new_mult = self._bounded_step(current, target)
                     self._signal_adjustments[sig_key] = new_mult
-                    self.log.info(f"Signal {sig_key} adjustment (loss): {current:.2f} -> {new_mult:.2f}")
+                    self.log.info(
+                        f"Signal {sig_key} adjustment (loss): {current:.2f} -> {new_mult:.2f} (n={sig_samples})"
+                    )
 
     def _update_adjustments_from_win(
         self,
@@ -825,19 +956,30 @@ class LearningEngine(EnhancedLearningEngine):
         with self._state_lock:
             # Symmetric update policy: 2% reward on win.
             symbol = symbol.upper()
-            current = self._symbol_adjustments.get(symbol, 1.0)
-            new_mult = min(1.5, current * self.WIN_ADJUSTMENT_MULT)
-            self._symbol_adjustments[symbol] = new_mult
-            self.log.info(f"Symbol {symbol} adjustment (win): {current:.2f} -> {new_mult:.2f}")
+            symbol_samples = self._closed_trades_for_symbol(symbol)
+            if symbol_samples >= int(self.SYMBOL_ADJUST_MIN_TRADES):
+                current = self._symbol_adjustments.get(symbol, 1.0)
+                target = min(1.5, current * self.WIN_ADJUSTMENT_MULT)
+                new_mult = self._bounded_step(current, target)
+                self._symbol_adjustments[symbol] = new_mult
+                self.log.info(
+                    f"Symbol {symbol} adjustment (win): {current:.2f} -> {new_mult:.2f} (n={symbol_samples})"
+                )
 
             # Update signal adjustments for signals that agreed with winning direction (directional)
             for signal, sig_dir in signals_at_entry.items():
                 if sig_dir == direction:
                     sig_key = f"{signal.lower()}:{direction.upper()}"
+                    sig_samples = self._closed_trades_for_signal_direction(signal, direction)
+                    if sig_samples < int(self.SIGNAL_ADJUST_MIN_TRADES):
+                        continue
                     current = self._signal_adjustments.get(sig_key, 1.0)
-                    new_mult = min(1.5, current * self.WIN_ADJUSTMENT_MULT)
+                    target = min(1.5, current * self.WIN_ADJUSTMENT_MULT)
+                    new_mult = self._bounded_step(current, target)
                     self._signal_adjustments[sig_key] = new_mult
-                    self.log.info(f"Signal {sig_key} adjustment (win): {current:.2f} -> {new_mult:.2f}")
+                    self.log.info(
+                        f"Signal {sig_key} adjustment (win): {current:.2f} -> {new_mult:.2f} (n={sig_samples})"
+                    )
 
         if persist:
             self.save_state()

@@ -62,15 +62,18 @@ Core learning state is carried in `learning_state_kv` (`patterns`/`adjustments`)
 `symbol_policy` rows are optional and can be empty depending on source history/release.
 
 Release seed URL:
-- `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v2-20260220`
+- `https://github.com/Degenapetrader/EVClaw/releases/tag/evclaw-learning-seed-v3-20260222`
 
-Current official release seed note (v2, 2026-02-20):
+Current official release seed note (v3, 2026-02-22):
 - `learning_state_kv`: populated
 - `symbol_policy`: populated
 
-Import command:
+Learning bootstrap options:
 ```bash
 EVCLAW_ROOT="/path/to/evclaw"
+# Recommended default for new users: start fresh (no import command needed).
+
+# Optional import path (historical bootstrap): dry-run first.
 # Dry-run (default): auto-downloads official release seed + verifies SHA256.
 python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 
@@ -95,6 +98,7 @@ For OpenClaw agents:
 - Require user approval first.
 - Run dry-run command first.
 - Only run `--apply` after user confirms.
+- Do not present import as mandatory; fresh start is the recommended default.
 
 Pros:
 - Better trading knowledge from real trade history.

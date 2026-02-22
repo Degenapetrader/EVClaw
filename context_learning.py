@@ -287,7 +287,14 @@ class ContextLearningEngine:
     """
     
     # Minimum trades needed before applying adjustments
-    MIN_TRADES_FOR_ADJUSTMENT = 10
+    MIN_TRADES_FOR_ADJUSTMENT = max(
+        1,
+        int(os.getenv("EVCLAW_CONTEXT_MIN_TRADES_FOR_ADJUSTMENT", "20")),
+    )
+    PRIOR_STRENGTH = max(
+        1,
+        int(os.getenv("EVCLAW_CONTEXT_PRIOR_STRENGTH", "20")),
+    )
 
     # Adjustment bounds
     MIN_ADJUSTMENT = 0.5
@@ -458,15 +465,17 @@ class ContextLearningEngine:
             
             stats = self._stats[feature_name][condition]
             
-            if stats.trades < self.MIN_TRADES_FOR_ADJUSTMENT:
+            # Bayesian shrinkage toward baseline for low-sample buckets.
+            n = max(0, int(stats.trades or 0))
+            w = float(n) / float(n + int(self.PRIOR_STRENGTH))
+            shrunk_win_rate = (w * float(stats.win_rate)) + ((1.0 - w) * float(self.BASELINE_WIN_RATE))
+
+            # Keep neutral behavior until enough evidence.
+            if n < self.MIN_TRADES_FOR_ADJUSTMENT:
                 return 1.0
-            
-            # Scale adjustment based on win rate deviation from baseline
-            # If win rate = baseline (45%), adjustment = 1.0
-            # If win rate = 60%, adjustment > 1.0 (boost)
-            # If win rate = 30%, adjustment < 1.0 (penalty)
-            
-            deviation = stats.win_rate - self.BASELINE_WIN_RATE
+
+            # Scale adjustment based on shrunk win-rate deviation from baseline.
+            deviation = shrunk_win_rate - self.BASELINE_WIN_RATE
             # Scale: ±0.20 win rate deviation = ±0.25 adjustment
             adjustment = 1.0 + (deviation * 1.25)
             

@@ -14,6 +14,8 @@ import argparse
 import asyncio
 import concurrent.futures
 import logging
+import math
+import os
 import sqlite3
 import threading
 import time
@@ -35,9 +37,14 @@ logger = logging.getLogger(__name__)
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-MIN_SAMPLES_FOR_SYMBOL_POLICY = get_param("symbol_rr_learning", "min_samples_for_symbol_policy")  # Minimum trades before symbol gets own policy
+MIN_SAMPLES_FOR_SYMBOL_POLICY = max(
+    25,
+    int(get_param("symbol_rr_learning", "min_samples_for_symbol_policy")),
+)  # Minimum trades before symbol gets own policy
 MIN_SAMPLES_FOR_CONFIDENCE = get_param("symbol_rr_learning", "min_samples_for_confidence")    # High confidence threshold
 LOOKBACK_DAYS = get_param("symbol_rr_learning", "lookback_days")                # How far back to look for trades
+RECENCY_HALF_LIFE_DAYS = max(1.0, float(os.getenv("EVCLAW_SYMBOL_RR_RECENCY_HALF_LIFE_DAYS", "14")))
+POLICY_MAX_DELTA = max(0.0, float(os.getenv("EVCLAW_SYMBOL_RR_POLICY_MAX_DELTA", "0.10")))
 
 # OI fetch limits (reduce blocking time)
 BINANCE_OI_TIMEOUT_SEC = 5.0
@@ -160,6 +167,8 @@ class SymbolStats:
     optimal_tp_mult: Optional[float] = None
     expectancy: float = 0.0
     confidence: str = 'low'  # low, medium, high
+    sl_hit_rate: float = 0.0
+    tp_hit_rate: float = 0.0
 
 
 @dataclass
@@ -495,6 +504,10 @@ class SymbolRRLearner:
         if not trades:
             return stats
 
+        now_ts = datetime.now(timezone.utc).timestamp()
+        weights = [self._trade_recency_weight(t.exit_time, now_ts) for t in trades]
+        total_w = sum(weights) if weights else 0.0
+
         stats.trades = len(trades)
         stats.wins = sum(1 for t in trades if t.is_winner)
         stats.losses = stats.trades - stats.wins
@@ -503,14 +516,27 @@ class SymbolRRLearner:
         stats.other_exits = stats.trades - stats.sl_hits - stats.tp_hits
 
         pnls = [t.realized_pnl for t in trades if t.realized_pnl is not None]
-        pnl_pcts = [t.realized_pnl_pct for t in trades if t.realized_pnl_pct is not None]
+        pnl_pairs = [
+            (float(t.realized_pnl_pct), float(w))
+            for t, w in zip(trades, weights)
+            if t.realized_pnl_pct is not None
+        ]
 
         if pnls:
             stats.total_pnl = sum(pnls)
-        if pnl_pcts:
-            stats.avg_pnl_pct = mean(pnl_pcts)
+        if pnl_pairs:
+            num = sum(v * w for v, w in pnl_pairs)
+            den = sum(w for _v, w in pnl_pairs)
+            stats.avg_pnl_pct = (num / den) if den > 0 else 0.0
 
-        stats.win_rate = stats.wins / stats.trades if stats.trades > 0 else 0.0
+        if total_w > 0:
+            stats.win_rate = sum(w for t, w in zip(trades, weights) if t.is_winner) / total_w
+            stats.sl_hit_rate = sum(w for t, w in zip(trades, weights) if t.hit_sl) / total_w
+            stats.tp_hit_rate = sum(w for t, w in zip(trades, weights) if t.hit_tp) / total_w
+        else:
+            stats.win_rate = stats.wins / stats.trades if stats.trades > 0 else 0.0
+            stats.sl_hit_rate = stats.sl_hits / stats.trades if stats.trades > 0 else 0.0
+            stats.tp_hit_rate = stats.tp_hits / stats.trades if stats.trades > 0 else 0.0
 
         # MAE/MFE stats (use 90th percentile for MAE to capture tail risk)
         maes = [t.mae_pct for t in trades if t.mae_pct is not None]
@@ -538,11 +564,27 @@ class SymbolRRLearner:
             stats.avg_tp_distance_pct = mean(tp_dists)
 
         # Expectancy = (win_rate * avg_win) - (loss_rate * avg_loss)
-        winning_pnls = [t.realized_pnl_pct for t in trades if t.is_winner and t.realized_pnl_pct is not None]
-        losing_pnls = [abs(t.realized_pnl_pct) for t in trades if (not t.is_winner) and t.realized_pnl_pct is not None]
+        winning_pnls = [
+            (float(t.realized_pnl_pct), float(w))
+            for t, w in zip(trades, weights)
+            if t.is_winner and t.realized_pnl_pct is not None
+        ]
+        losing_pnls = [
+            (abs(float(t.realized_pnl_pct)), float(w))
+            for t, w in zip(trades, weights)
+            if (not t.is_winner) and t.realized_pnl_pct is not None
+        ]
 
-        avg_win = mean(winning_pnls) if winning_pnls else 0
-        avg_loss = mean(losing_pnls) if losing_pnls else 0
+        avg_win = (
+            sum(v * w for v, w in winning_pnls) / max(1e-9, sum(w for _v, w in winning_pnls))
+            if winning_pnls
+            else 0.0
+        )
+        avg_loss = (
+            sum(v * w for v, w in losing_pnls) / max(1e-9, sum(w for _v, w in losing_pnls))
+            if losing_pnls
+            else 0.0
+        )
 
         stats.expectancy = (stats.win_rate * avg_win) - ((1 - stats.win_rate) * avg_loss)
 
@@ -589,7 +631,7 @@ class SymbolRRLearner:
         mae_for_comparison = stats.p90_mae_pct or stats.avg_mae_pct  # Prefer p90
 
         if mae_for_comparison is not None and stats.avg_sl_distance_pct is not None:
-            sl_hit_rate = stats.sl_hits / stats.trades if stats.trades > 0 else 0
+            sl_hit_rate = stats.sl_hit_rate if stats.trades > 0 else 0.0
 
             if sl_hit_rate > 0.35:
                 # High stop rate - consider widening SL
@@ -602,7 +644,7 @@ class SymbolRRLearner:
         # TP Optimization based on MFE
         # ─────────────────────────────────────────────────────────────────────
         if stats.avg_mfe_pct is not None and stats.avg_tp_distance_pct is not None:
-            tp_hit_rate = stats.tp_hits / stats.trades if stats.trades > 0 else 0
+            tp_hit_rate = stats.tp_hit_rate if stats.trades > 0 else 0.0
 
             if tp_hit_rate > 0.5:
                 # Hitting TP often - maybe we can aim higher
@@ -618,7 +660,7 @@ class SymbolRRLearner:
         # Win rate adjustments (diagnose WHY win rate is low)
         # ─────────────────────────────────────────────────────────────────────
         if stats.win_rate < 0.3:
-            sl_hit_rate = stats.sl_hits / stats.trades if stats.trades > 0 else 0
+            sl_hit_rate = stats.sl_hit_rate if stats.trades > 0 else 0.0
             if sl_hit_rate > 0.4:
                 # Stops ARE the problem - widen SL
                 sl_mult = min(sl_mult * 1.1, SL_MAX)
@@ -653,6 +695,32 @@ class SymbolRRLearner:
         """Update or insert symbol policy in database."""
         conn = self._get_connection()
         now = datetime.now(timezone.utc)
+
+        # Rate-limit per-update policy drift to reduce oscillation.
+        prev = conn.execute(
+            """
+            SELECT sl_mult_adjustment, tp_mult_adjustment
+            FROM symbol_policy
+            WHERE symbol = ?
+            """,
+            (symbol,),
+        ).fetchone()
+        max_delta = float(max(0.0, POLICY_MAX_DELTA))
+        if prev is not None and max_delta > 0:
+            prev_sl = float(prev["sl_mult_adjustment"] or sl_mult)
+            prev_tp = float(prev["tp_mult_adjustment"] or tp_mult)
+            if abs(float(sl_mult) - prev_sl) > max_delta:
+                sl_mult = prev_sl + (max_delta if float(sl_mult) > prev_sl else -max_delta)
+            if abs(float(tp_mult) - prev_tp) > max_delta:
+                tp_mult = prev_tp + (max_delta if float(tp_mult) > prev_tp else -max_delta)
+
+        sl_mult = max(float(SL_MIN), min(float(SL_MAX), float(sl_mult)))
+        tp_mult = max(float(TP_MIN), min(float(TP_MAX), float(tp_mult)))
+        rr_ratio = tp_mult / sl_mult if sl_mult > 0 else 1.5
+        if rr_ratio < 1.0:
+            tp_mult = sl_mult * 1.0
+        elif rr_ratio > 2.5:
+            tp_mult = sl_mult * 2.5
 
         # Build notes
         notes_parts = []
@@ -702,6 +770,14 @@ class SymbolRRLearner:
                    f"(n={stats.trades}, WR={stats.win_rate:.1%}, exp={stats.expectancy:.2f})")
 
         return policy
+
+    @staticmethod
+    def _trade_recency_weight(exit_time: Optional[float], now_ts: float) -> float:
+        if not exit_time:
+            return 1.0
+        age_days = max(0.0, float(now_ts - float(exit_time)) / 86400.0)
+        hl = max(1.0, float(RECENCY_HALF_LIFE_DAYS))
+        return max(0.05, min(1.0, float(math.exp(-math.log(2.0) * (age_days / hl)))))
 
     def get_policy_for_symbol(self, symbol: str) -> Tuple[float, float, str]:
         """

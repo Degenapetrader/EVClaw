@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
 import shutil
 import sqlite3
@@ -190,6 +191,233 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return float(x)
     except Exception:
         return default
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1",
+        (str(name),),
+    ).fetchone()
+    return row is not None
+
+
+def _conclusion_sample_weight(n_closed: int, min_trades: int, full_weight_trades: int) -> float:
+    n = int(max(0, n_closed))
+    mn = int(max(1, min_trades))
+    full = int(max(mn, full_weight_trades))
+    if n < mn:
+        return 0.0
+    if n >= full:
+        return 1.0
+    denom = float(max(1, full - mn))
+    return max(0.0, min(1.0, float(n - mn) / denom))
+
+
+def _conclusion_age_weight(
+    *,
+    updated_at: Optional[float],
+    now_ts: float,
+    half_life_days: float,
+    max_age_days: float,
+) -> float:
+    ts = _safe_float(updated_at, 0.0)
+    if ts <= 0:
+        return 0.0
+    age_days = max(0.0, float(now_ts - ts) / 86400.0)
+    if max_age_days > 0.0 and age_days > max_age_days:
+        return 0.0
+    hl = max(0.0001, float(half_life_days))
+    return max(0.0, min(1.0, math.exp(-math.log(2.0) * (age_days / hl))))
+
+
+def _collect_learning_conclusion_metrics(conn: sqlite3.Connection) -> Dict[str, Any]:
+    now_ts = float(time.time())
+    min_trades = max(1, int(_safe_float(os.getenv("EVCLAW_CONCLUSION_MIN_TRADES"), 20.0)))
+    full_weight_trades = max(
+        min_trades, int(_safe_float(os.getenv("EVCLAW_CONCLUSION_FULL_WEIGHT_TRADES"), 40.0))
+    )
+    half_life_days = max(0.0001, _safe_float(os.getenv("EVCLAW_CONCLUSION_HALF_LIFE_DAYS"), 7.0))
+    max_age_days = max(0.0, _safe_float(os.getenv("EVCLAW_CONCLUSION_MAX_AGE_DAYS"), 21.0))
+    min_inject_weight = max(
+        0.0, min(1.0, _safe_float(os.getenv("EVCLAW_CONCLUSION_MIN_INJECT_WEIGHT"), 0.10))
+    )
+
+    out: Dict[str, Any] = {
+        "conclusion_rows_total": 0,
+        "conclusion_rows_active_weighted": 0,
+        "conclusion_rows_low_sample": 0,
+        "conclusion_avg_effective_weight": 0.0,
+        "nonzero_adjustment_rows": 0,
+        "avg_abs_long_adjustment": 0.0,
+        "avg_abs_short_adjustment": 0.0,
+        "pattern_avoid_active_count": None,
+        "adaptive_step_clamped_count_24h": None,
+        "gate_reject_total_24h": None,
+        "dossier_reject_total_24h": None,
+        "dossier_reject_rate_24h": None,
+        "rejections_with_dossier_only_reason_24h": None,
+        "cycle_rows_24h": None,
+        "llm_gate_bypassed_count_24h": None,
+        "entry_gate_timeout_count_24h": None,
+        "entry_gate_timeout_rate_24h": None,
+    }
+
+    if _table_exists(conn, "symbol_conclusions_v1"):
+        try:
+            rows = conn.execute(
+                """
+                SELECT c.symbol, c.updated_at, c.conclusion_json, COALESCE(s.n_closed, 0) AS n_closed
+                FROM symbol_conclusions_v1 c
+                LEFT JOIN symbol_learning_state s ON s.symbol = c.symbol
+                """
+            ).fetchall()
+            out["conclusion_rows_total"] = len(rows)
+            weight_sum = 0.0
+            abs_long_sum = 0.0
+            abs_short_sum = 0.0
+            for row in rows:
+                n_closed = int(row["n_closed"] or 0)
+                if n_closed < min_trades:
+                    out["conclusion_rows_low_sample"] = int(out["conclusion_rows_low_sample"]) + 1
+                sample_w = _conclusion_sample_weight(n_closed, min_trades, full_weight_trades)
+                age_w = _conclusion_age_weight(
+                    updated_at=row["updated_at"],
+                    now_ts=now_ts,
+                    half_life_days=half_life_days,
+                    max_age_days=max_age_days,
+                )
+                w = max(0.0, min(1.0, sample_w * age_w))
+                weight_sum += w
+                if w >= min_inject_weight:
+                    out["conclusion_rows_active_weighted"] = int(out["conclusion_rows_active_weighted"]) + 1
+                long_abs = 0.0
+                short_abs = 0.0
+                raw_json = str(row["conclusion_json"] or "").strip()
+                if raw_json:
+                    try:
+                        parsed = json.loads(raw_json)
+                        if isinstance(parsed, dict):
+                            long_abs = abs(_safe_float(parsed.get("long_adjustment"), 0.0))
+                            short_abs = abs(_safe_float(parsed.get("short_adjustment"), 0.0))
+                    except Exception:
+                        pass
+                abs_long_sum += float(long_abs)
+                abs_short_sum += float(short_abs)
+                if long_abs > 1e-9 or short_abs > 1e-9:
+                    out["nonzero_adjustment_rows"] = int(out["nonzero_adjustment_rows"]) + 1
+            if rows:
+                out["conclusion_avg_effective_weight"] = float(weight_sum) / float(len(rows))
+                out["avg_abs_long_adjustment"] = float(abs_long_sum) / float(len(rows))
+                out["avg_abs_short_adjustment"] = float(abs_short_sum) / float(len(rows))
+        except Exception:
+            pass
+
+    if _table_exists(conn, "learning_state_kv"):
+        try:
+            row = conn.execute(
+                "SELECT value_json FROM learning_state_kv WHERE key = 'patterns' LIMIT 1"
+            ).fetchone()
+            active = 0
+            if row is not None:
+                raw = str(row["value_json"] or "").strip()
+                if raw:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        for entry in parsed.values():
+                            if not isinstance(entry, dict):
+                                continue
+                            avoid_until = _safe_float(entry.get("avoid_until"), 0.0)
+                            if avoid_until > now_ts:
+                                active += 1
+            out["pattern_avoid_active_count"] = int(active)
+        except Exception:
+            pass
+
+    cutoff_24h = now_ts - 86400.0
+    if _table_exists(conn, "gate_decisions_v1"):
+        try:
+            total_reject = conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM gate_decisions_v1
+                WHERE decision = 'REJECT'
+                  AND created_at >= ?
+                """,
+                (cutoff_24h,),
+            ).fetchone()
+            total_reject_n = int((total_reject["n"] if total_reject else 0) or 0)
+            out["gate_reject_total_24h"] = total_reject_n
+
+            dossier_reject = conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM gate_decisions_v1
+                WHERE decision = 'REJECT'
+                  AND created_at >= ?
+                  AND (
+                    LOWER(COALESCE(reason, '')) LIKE '%dossier%'
+                    OR LOWER(COALESCE(reason, '')) LIKE '%conclusion%'
+                  )
+                """,
+                (cutoff_24h,),
+            ).fetchone()
+            dossier_reject_n = int((dossier_reject["n"] if dossier_reject else 0) or 0)
+            out["dossier_reject_total_24h"] = dossier_reject_n
+            out["dossier_reject_rate_24h"] = (
+                float(dossier_reject_n) / float(total_reject_n) if total_reject_n > 0 else 0.0
+            )
+
+            dossier_only = conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM gate_decisions_v1
+                WHERE decision = 'REJECT'
+                  AND created_at >= ?
+                  AND (
+                    LOWER(COALESCE(reason, '')) LIKE '%dossier%'
+                    OR LOWER(COALESCE(reason, '')) LIKE '%conclusion%'
+                  )
+                  AND LOWER(COALESCE(reason, '')) NOT LIKE '%signal%'
+                  AND LOWER(COALESCE(reason, '')) NOT LIKE '%exposure%'
+                  AND LOWER(COALESCE(reason, '')) NOT LIKE '%risk%'
+                """,
+                (cutoff_24h,),
+            ).fetchone()
+            out["rejections_with_dossier_only_reason_24h"] = int((dossier_only["n"] if dossier_only else 0) or 0)
+        except Exception:
+            pass
+
+    if _table_exists(conn, "cycle_runs"):
+        try:
+            cycle_rows = conn.execute(
+                "SELECT processed_summary FROM cycle_runs WHERE processed_at IS NOT NULL AND processed_at >= ?",
+                (cutoff_24h,),
+            ).fetchall()
+            bypass_count = 0
+            timeout_count = 0
+            total = len(cycle_rows)
+            for row in cycle_rows:
+                raw = str(row["processed_summary"] or "").strip()
+                if not raw:
+                    continue
+                try:
+                    summary = json.loads(raw)
+                except Exception:
+                    continue
+                if bool(summary.get("llm_gate_bypassed")):
+                    bypass_count += 1
+                    reason = str(summary.get("llm_gate_bypass_reason") or "").lower()
+                    if "timeout" in reason:
+                        timeout_count += 1
+            out["cycle_rows_24h"] = total
+            out["llm_gate_bypassed_count_24h"] = bypass_count
+            out["entry_gate_timeout_count_24h"] = timeout_count
+            out["entry_gate_timeout_rate_24h"] = (
+                float(timeout_count) / float(total) if total > 0 else 0.0
+            )
+        except Exception:
+            pass
+    return out
 
 
 def _ensure_countertrend_guard_table(conn: sqlite3.Connection) -> None:
@@ -1376,6 +1604,9 @@ async def _run_hourly(args: argparse.Namespace) -> int:
 
         # 8) countertrend guard status
         report["checks"]["countertrend_guard"] = _countertrend_guard_status(conn)
+
+        # 8.5) learning/conclusion health metrics
+        report["checks"]["learning_conclusions"] = _collect_learning_conclusion_metrics(conn)
 
         # 9) recent closes summary
         report["checks"]["closes_60m"] = _recent_closes(conn)
