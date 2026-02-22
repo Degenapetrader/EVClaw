@@ -94,6 +94,12 @@ def _utc(ts: Optional[float]) -> Optional[str]:
 def _safe_json(x: Any, default: Any) -> Any:
     if x is None:
         return default
+    if isinstance(x, (dict, list)):
+        return x
+    try:
+        return json.loads(str(x))
+    except Exception:
+        return default
 
 
 def _env_int(name: str, default: int) -> int:
@@ -235,12 +241,6 @@ def _normalize_symbol_conclusion(
         "notes": notes,
     }
     return safe_text, float(conf), json.dumps(normalized_json, separators=(",", ":"), ensure_ascii=False)
-    if isinstance(x, (dict, list)):
-        return x
-    try:
-        return json.loads(str(x))
-    except Exception:
-        return default
 
 
 def fetch_trade_context(db_path: str, trade_id: int) -> Optional[Dict[str, Any]]:
