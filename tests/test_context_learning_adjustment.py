@@ -26,8 +26,10 @@ def test_context_adjustment_uses_geometric_mean() -> None:
         eng.extract_conditions = lambda _ctx, _dir: {k: "a" for k in eng._stats.keys()}  # type: ignore[assignment]
 
         adj, _ = eng.get_context_adjustment({}, "LONG")
+        single_feature_adj = eng.get_condition_adjustment("f1", "a")
 
         # Old multiplicative logic collapsed to ~0.328 then clamped to 0.5.
-        # Geometric-mean logic should stay close to a single-feature penalty (~0.81).
-        assert adj > 0.7
-        assert adj < 0.9
+        # Geometric-mean logic should stay equal to a single-feature penalty
+        # when all feature adjustments are the same.
+        assert abs(adj - single_feature_adj) < 1e-9
+        assert 0.8 < adj < 1.0

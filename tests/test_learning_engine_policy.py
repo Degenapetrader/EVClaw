@@ -35,6 +35,10 @@ def test_learning_engine_win_loss_policy_helpers() -> None:
 def test_learning_engine_adjustments_are_symmetric() -> None:
     with tempfile.TemporaryDirectory() as td:
         eng = _mk_engine(td)
+        # New policy gates adjustments by minimum sample counts.
+        # Force this unit test onto the core symmetric update path.
+        eng._closed_trades_for_symbol = lambda _sym: 100  # type: ignore[assignment]
+        eng._closed_trades_for_signal_direction = lambda _sig, _dir: 100  # type: ignore[assignment]
         eng._symbol_adjustments["ETH"] = 1.0
 
         mistake = Mistake(

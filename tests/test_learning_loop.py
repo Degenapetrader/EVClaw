@@ -176,9 +176,9 @@ def test_process_closed_trade_triggers_full_pipeline():
         assert "adjustments" in saved and json.loads(saved["adjustments"]), "adjustments state should be persisted"
         print("  - DB-backed state persisted")
 
-        # Verify symbol adjustment was updated (losing trade reduces multiplier)
+        # Verify symbol adjustment remains neutral until minimum sample gate is met.
         eth_adj = engine.get_symbol_adjustment("ETH")
-        assert eth_adj < 1.0, f"ETH adjustment should be reduced, got {eth_adj}"
+        assert abs(eth_adj - 1.0) < 1e-9, f"ETH adjustment should stay neutral before sample gate, got {eth_adj}"
         print(f"  - Symbol adjustment for ETH: {eth_adj:.2f}")
 
     print("PASS\n")
@@ -202,10 +202,10 @@ def test_pattern_avoidance_after_multiple_losses():
             memory_dir=memory_dir,
         )
 
-        # Insert 6 losing trades with same signal pattern
-        # (AVOID_MIN_TRADES=5, AVOID_WIN_RATE_THRESHOLD=0.30)
+        # Insert enough losing trades to cross current avoidance minimum sample gate.
         signals = ["cvd", "fade"]
-        for i in range(6):
+        n_losses = max(6, int(engine.AVOID_MIN_TRADES))
+        for i in range(n_losses):
             insert_losing_trade(db_path, trade_id=i+1, symbol="ETH", direction="LONG",
                                pnl=-50.0, signals=signals)
             asyncio.run(engine.process_closed_trade(i+1))
@@ -217,7 +217,7 @@ def test_pattern_avoidance_after_multiple_losses():
 
         print(f"  - Pattern: {pattern_key}")
         print(f"  - Trades: {pattern.trades}, Wins: {pattern.wins}, Win rate: {pattern.win_rate:.0%}")
-        assert pattern.trades == 6, f"Expected 6 trades, got {pattern.trades}"
+        assert pattern.trades == n_losses, f"Expected {n_losses} trades, got {pattern.trades}"
         assert pattern.wins == 0, f"Expected 0 wins, got {pattern.wins}"
         assert pattern.win_rate == 0.0, f"Expected 0% win rate, got {pattern.win_rate}"
 
