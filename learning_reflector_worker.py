@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -62,6 +63,7 @@ DEFAULT_THINKING = (
 DEFAULT_DB = EVCLAW_DB_PATH
 DEFAULT_STALE_RUNNING_SEC = _env_float("EVCLAW_REFLECTION_STALE_RUNNING_SEC", 600.0)
 DEFAULT_RETRY_BACKOFF_SEC = _env_float("EVCLAW_REFLECTION_RETRY_BACKOFF_SEC", 30.0)
+_ABSOLUTE_PATTERN = re.compile(r"\b(permanent(?:ly)?|never|always|ban(?:ned)?|absolute)\b", re.IGNORECASE)
 
 
 def _as_float(x: Any, default: Optional[float] = None) -> Optional[float]:
@@ -92,6 +94,147 @@ def _utc(ts: Optional[float]) -> Optional[str]:
 def _safe_json(x: Any, default: Any) -> Any:
     if x is None:
         return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return int(default)
+    try:
+        return int(str(raw).strip())
+    except Exception:
+        return int(default)
+
+
+def _conclusion_min_trades() -> int:
+    return max(1, _env_int("EVCLAW_CONCLUSION_MIN_TRADES", 20))
+
+
+def _conclusion_max_adjust() -> float:
+    return max(0.0, min(1.0, _env_float("EVCLAW_CONCLUSION_MAX_DIRECTIONAL_ADJUST", 0.30)))
+
+
+def _conclusion_max_conditions() -> int:
+    return max(0, _env_int("EVCLAW_CONCLUSION_MAX_CONDITIONAL_RULES", 2))
+
+
+def _sanitize_conclusion_text(text: Any, *, max_chars: int = 1200) -> str:
+    t = str(text or "").strip()
+    if not t:
+        return ""
+    t = _ABSOLUTE_PATTERN.sub("cautious", t)
+    t = " ".join(t.split())
+    return _cap(t, max_chars)
+
+
+def _normalize_conditions(raw: Any, *, max_conditions: int) -> List[str]:
+    out: List[str] = []
+    if not isinstance(raw, list):
+        return out
+    seen = set()
+    for item in raw:
+        txt = str(item or "").strip()
+        if not txt:
+            continue
+        txt = _sanitize_conclusion_text(txt, max_chars=140)
+        key = txt.lower()
+        if not txt or key in seen:
+            continue
+        seen.add(key)
+        out.append(txt)
+        if len(out) >= max_conditions:
+            break
+    return out
+
+
+def _fetch_symbol_closed_trades(db_path: str, symbol: str) -> int:
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return 0
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        try:
+            row = conn.execute(
+                "SELECT n_closed FROM symbol_learning_state WHERE symbol = ? LIMIT 1",
+                (sym,),
+            ).fetchone()
+            if row is not None:
+                try:
+                    n_closed = int(row["n_closed"] or 0)
+                    if n_closed > 0:
+                        return n_closed
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        row2 = conn.execute(
+            "SELECT COUNT(*) AS n FROM trades WHERE symbol = ? AND exit_time IS NOT NULL",
+            (sym,),
+        ).fetchone()
+        return int(row2["n"] or 0) if row2 else 0
+    finally:
+        conn.close()
+
+
+def _normalize_symbol_conclusion(
+    *,
+    symbol: str,
+    raw: Dict[str, Any],
+    sample_size_seen: int,
+    min_trades: int,
+    max_adjust: float,
+    max_conditions: int,
+) -> Tuple[str, float, str]:
+    data = dict(raw or {})
+    conf = _as_float(data.get("confidence"), default=0.0)
+    if conf is None:
+        conf = 0.0
+    conf = max(0.0, min(1.0, float(conf)))
+
+    j = data.get("conclusion_json")
+    j_obj = dict(j) if isinstance(j, dict) else {}
+
+    long_adj = _as_float(j_obj.get("long_adjustment"), default=0.0)
+    short_adj = _as_float(j_obj.get("short_adjustment"), default=0.0)
+    long_adj = 0.0 if long_adj is None else float(long_adj)
+    short_adj = 0.0 if short_adj is None else float(short_adj)
+    long_adj = max(-max_adjust, min(max_adjust, long_adj))
+    short_adj = max(-max_adjust, min(max_adjust, short_adj))
+
+    if int(sample_size_seen) < int(min_trades):
+        soft_cap = min(0.05, max_adjust)
+        long_adj = max(-soft_cap, min(soft_cap, long_adj))
+        short_adj = max(-soft_cap, min(soft_cap, short_adj))
+        conf = min(conf, 0.35)
+
+    conditions = _normalize_conditions(j_obj.get("conditions"), max_conditions=max_conditions)
+    notes = _normalize_conditions(j_obj.get("notes"), max_conditions=3)
+    bias = _sanitize_conclusion_text(j_obj.get("bias"), max_chars=100)
+
+    safe_text = _sanitize_conclusion_text(data.get("conclusion_text"), max_chars=320)
+    if not safe_text:
+        safe_text = (
+            f"{str(symbol or '').upper()} advisory prior: long_adj={long_adj:+.2f}, "
+            f"short_adj={short_adj:+.2f}, n={int(sample_size_seen)}."
+        )
+    if int(sample_size_seen) < int(min_trades):
+        safe_text += f" Low sample (n<{int(min_trades)}); keep near-neutral."
+    safe_text = _cap(" ".join(safe_text.split()), 1200)
+
+    normalized_json = {
+        "version": "symbol_conclusion_v2",
+        "sample_size_seen": int(sample_size_seen),
+        "min_trades_required": int(min_trades),
+        "confidence": float(conf),
+        "long_adjustment": float(round(long_adj, 4)),
+        "short_adjustment": float(round(short_adj, 4)),
+        "max_directional_adjust": float(round(max_adjust, 4)),
+        "conditions": conditions,
+        "bias": bias,
+        "notes": notes,
+    }
+    return safe_text, float(conf), json.dumps(normalized_json, separators=(",", ":"), ensure_ascii=False)
     if isinstance(x, (dict, list)):
         return x
     try:
@@ -229,17 +372,22 @@ def build_symbol_conclusion_prompt(
             "no_markdown": True,
             "conclusion_text_max_chars": 300,
             "confidence_range": [0.0, 1.0],
+            "no_absolute_language": True,
+            "max_directional_adjust_abs": _conclusion_max_adjust(),
+            "max_conditions": _conclusion_max_conditions(),
+            "advisory_only": True,
         },
     }
 
     schema = {
-        "conclusion_text": "string (compact; stable; direct)",
+        "conclusion_text": "string (compact; probabilistic; advisory-only; avoid 'never/always/permanent/ban')",
         "confidence": "float 0..1",
         "conclusion_json": {
-            "bias": "string (e.g. prefer shorts / avoid longs / neutral)",
-            "avoid": ["string"],
-            "prefer": ["string"],
-            "sizing": "string",
+            "long_adjustment": "float in [-0.30, +0.30]",
+            "short_adjustment": "float in [-0.30, +0.30]",
+            "sample_size_seen": "int",
+            "conditions": ["string (broad condition only; max 2)"],
+            "bias": "string (advisory bias; optional)",
             "notes": ["string"],
         },
     }
@@ -247,6 +395,8 @@ def build_symbol_conclusion_prompt(
     return (
         "You maintain a rolling per-symbol trading conclusion that evolves as new lessons arrive.\n"
         "Update the conclusion for this symbol using ONLY the new lessons (plus previous conclusion).\n"
+        "Output advisory priors only; do not output hard bans or absolute prohibitions.\n"
+        "Use probabilistic language and bounded directional adjustments, not rules like NEVER/PERMANENTLY.\n"
         "Return ONLY valid JSON matching this schema (no markdown, no commentary):\n"
         + json.dumps(schema, separators=(",", ":"), ensure_ascii=False)
         + "\nINPUT:\n"
@@ -418,17 +568,15 @@ async def process_one_task(
                     timeout_sec=_reflector_timeout_sec(),
                 )
 
-                conclusion_text = _cap(str(concl.get("conclusion_text") or "").strip(), 1200)
-                c_conf = _as_float(concl.get("confidence"), default=None)
-                if c_conf is not None:
-                    c_conf = max(0.0, min(1.0, float(c_conf)))
-
-                concl_json_obj = concl.get("conclusion_json")
-                concl_json = None
-                if isinstance(concl_json_obj, (dict, list)):
-                    concl_json = json.dumps(concl_json_obj, separators=(",", ":"), ensure_ascii=False)
-                elif concl_json_obj is not None:
-                    concl_json = _cap(str(concl_json_obj), 8000)
+                sample_size_seen = _fetch_symbol_closed_trades(db_path, sym)
+                conclusion_text, c_conf, concl_json = _normalize_symbol_conclusion(
+                    symbol=sym,
+                    raw=concl,
+                    sample_size_seen=sample_size_seen,
+                    min_trades=_conclusion_min_trades(),
+                    max_adjust=_conclusion_max_adjust(),
+                    max_conditions=_conclusion_max_conditions(),
+                )
 
                 last_id = int(new_lessons[-1].get("reflection_id") or last_seen)
                 db.upsert_symbol_conclusion(

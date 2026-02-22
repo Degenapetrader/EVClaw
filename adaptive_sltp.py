@@ -14,6 +14,7 @@ Key principles:
 """
 
 import json
+import math
 from logging_utils import get_logger
 import os
 import time
@@ -62,6 +63,10 @@ class AdaptiveSLTPConfig:
     # Match current production defaults (skill.yaml executor: 2.0/3.0)
     default_sl_mult: float = get_param("adaptive_sltp", "default_sl_mult")
     default_tp_mult: float = get_param("adaptive_sltp", "default_tp_mult")
+    # Anti-oscillation and stale-state decay controls
+    max_step_delta: float = float(os.getenv("EVCLAW_ADAPTIVE_SLTP_MAX_DELTA", "0.10"))
+    stale_half_life_hours: float = float(os.getenv("EVCLAW_ADAPTIVE_SLTP_STALE_HALF_LIFE_HOURS", "72"))
+    stale_max_age_hours: float = float(os.getenv("EVCLAW_ADAPTIVE_SLTP_STALE_MAX_AGE_HOURS", "336"))
 
 
 @dataclass
@@ -153,7 +158,8 @@ class AdaptiveSLTPManager:
         if key in self._params:
             params = self._params[key]
             if params.samples >= self.config.min_samples:
-                return params.sl_mult, params.tp_mult
+                sl_cached, tp_cached = self._apply_stale_decay(params)
+                return sl_cached, tp_cached
 
         # Try to calculate from tracker data
         if self.tracker:
@@ -187,6 +193,7 @@ class AdaptiveSLTPManager:
                     except Exception as e:
                         self.log.warning(f"Failed to persist adaptive SLTP state for {symbol}/{regime}: {e}")
 
+                    sl_mult, tp_mult = self._apply_stale_decay(self._params[key])
                     return sl_mult, tp_mult
 
             except Exception as e:
@@ -194,6 +201,30 @@ class AdaptiveSLTPManager:
 
         # Cold start: return defaults
         return self.config.default_sl_mult, self.config.default_tp_mult
+
+    def _apply_stale_decay(self, params: AdaptedParams) -> Tuple[float, float]:
+        """Decay stale cached params toward defaults when no fresh evidence arrives."""
+        now = time.time()
+        age_hours = max(0.0, (now - float(params.last_updated or 0.0)) / 3600.0)
+        max_age = max(1.0, float(self.config.stale_max_age_hours))
+        half_life = max(1.0, float(self.config.stale_half_life_hours))
+
+        if age_hours <= 0:
+            return float(params.sl_mult), float(params.tp_mult)
+        if age_hours > max_age:
+            params.sl_mult = float(self.config.default_sl_mult)
+            params.tp_mult = float(self.config.default_tp_mult)
+            params.last_updated = now
+            return params.sl_mult, params.tp_mult
+
+        decay = math.exp(-math.log(2.0) * (age_hours / half_life))
+        params.sl_mult = float(self.config.default_sl_mult) + (
+            float(params.sl_mult) - float(self.config.default_sl_mult)
+        ) * decay
+        params.tp_mult = float(self.config.default_tp_mult) + (
+            float(params.tp_mult) - float(self.config.default_tp_mult)
+        ) * decay
+        return float(params.sl_mult), float(params.tp_mult)
 
     def _calculate_adaptation(self, stats: SLTPStats) -> Tuple[float, float]:
         """
@@ -207,10 +238,18 @@ class AdaptiveSLTPManager:
 
         # Get current cached params if any
         key = f"{stats.symbol}:{stats.regime}"
+        current_sl = float(sl_mult)
+        current_tp = float(tp_mult)
         if key in self._params:
             current = self._params[key]
             sl_mult = current.sl_mult
             tp_mult = current.tp_mult
+            current_sl = float(sl_mult)
+            current_tp = float(tp_mult)
+
+        # Confidence-weighted adaptation speed: low samples => slower EMA.
+        confidence = min(1.0, max(0.1, float(stats.total_trades) / 50.0))
+        eff_alpha = max(0.01, min(1.0, float(self.config.ema_alpha) * confidence))
 
         # Adapt SL based on hit rate
         if stats.sl_hit_rate > self.config.widen_sl_threshold:
@@ -221,12 +260,12 @@ class AdaptiveSLTPManager:
             target_sl = sl_mult * adjustment
 
             # EMA update
-            sl_mult = sl_mult + self.config.ema_alpha * (target_sl - sl_mult)
+            sl_mult = sl_mult + eff_alpha * (target_sl - sl_mult)
 
         elif stats.sl_hit_rate < 0.3:
             # SL rarely hit - could tighten slightly
             target_sl = sl_mult * 0.95
-            sl_mult = sl_mult + self.config.ema_alpha * (target_sl - sl_mult)
+            sl_mult = sl_mult + eff_alpha * (target_sl - sl_mult)
 
         # Adapt TP based on hit rate
         if stats.tp_hit_rate < (1.0 - self.config.tighten_tp_threshold):
@@ -236,12 +275,18 @@ class AdaptiveSLTPManager:
             target_tp = tp_mult * max(0.8, adjustment)
 
             # EMA update
-            tp_mult = tp_mult + self.config.ema_alpha * (target_tp - tp_mult)
+            tp_mult = tp_mult + eff_alpha * (target_tp - tp_mult)
 
         elif stats.tp_hit_rate > 0.5:
             # TP hit often - could widen to capture more
             target_tp = tp_mult * 1.05
-            tp_mult = tp_mult + self.config.ema_alpha * (target_tp - tp_mult)
+            tp_mult = tp_mult + eff_alpha * (target_tp - tp_mult)
+
+        # Per-update change-rate clamp (before global bounds).
+        max_delta = max(0.0, float(self.config.max_step_delta))
+        if max_delta > 0:
+            sl_mult = max(current_sl - max_delta, min(current_sl + max_delta, sl_mult))
+            tp_mult = max(current_tp - max_delta, min(current_tp + max_delta, tp_mult))
 
         # Apply bounds
         sl_mult = max(self.config.sl_range_min, min(self.config.sl_range_max, sl_mult))

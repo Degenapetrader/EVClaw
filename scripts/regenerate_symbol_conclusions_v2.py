@@ -361,7 +361,7 @@ def _print_results(results: List[SymbolResult], *, apply_changes: bool) -> None:
 
 async def main_async() -> int:
     ap = argparse.ArgumentParser(
-        description="Regenerate symbol_conclusions_v1 from reflections using EVClaw reflector flow"
+        description="Regenerate symbol_conclusions_v1/v2 rows from reflections using EVClaw reflector flow"
     )
     ap.add_argument("--db", default=os.getenv("EVCLAW_DB_PATH", DEFAULT_DB))
     ap.add_argument("--agent-id", default=os.getenv("EVCLAW_LEARNING_REFLECTOR_AGENT_ID", DEFAULT_AGENT_ID))
