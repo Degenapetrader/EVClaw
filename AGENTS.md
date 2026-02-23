@@ -16,6 +16,16 @@ Purpose: compact runtime contract for AI agents/operators working in this repo.
 - `run_fill_reconciler.py`: fill tracking + reconciliation.
 - `live_monitor.py`: equity snapshots used by SR/equity safety checks.
 
+## Cron install requirement (critical)
+- EVClaw deterministic safety/reporting depends on OpenClaw cron jobs being installed and active.
+- After fresh setup or any repo update, run:
+  - `./scripts/install_openclaw_crons.sh`
+  - `openclaw cron list --json`
+- Expected jobs:
+  - `EVClaw AGI Trader Hourly (deterministic)`
+  - `EVClaw AGI Trader Hourly Report (system-event)`
+- If missing, scheduled safety checks, repo update checks, and update notifications will not run.
+
 ## Tool map contract
 - Canonical tool routing and usage are defined in `Tool.md`.
 - For manual/advisor turns, follow `Tool.md` and `MANUAL_COMMANDS` together.
@@ -115,6 +125,7 @@ Double-check scope (each run):
 - Pending limit cancel/reconcile backlog.
 - Node/tracker auth/data-path health.
 - Evidence integrity (no inferred claims without file/API proof).
+- Cron installation state when expected: both EVClaw cron jobs present and enabled.
 
 Repo update policy (hourly report):
 - Run deterministic repo check: `scripts/check_repo_update.py`.

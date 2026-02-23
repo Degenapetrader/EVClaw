@@ -9,7 +9,7 @@ It is designed to run on a fresh Linux VPS with no dependency on your private lo
 
 AI/operator runtime contract:
 - `AGENTS.md` is the canonical context map for this repo.
-- Scheduled cron prompts read only `CRON_CONTEXT` in `AGENTS.md` (not `MANUAL_COMMANDS`).
+- Scheduled cron prompts read only `AGI_SUPERVISOR_MODE` block in `AGENTS.md` (inside `CRON_CONTEXT`) and `Tool.md` `CRON_SAFE_TOOLS` (not `MANUAL_COMMANDS`).
 
 ## What EVClaw does
 
@@ -49,6 +49,9 @@ pip install -r requirements.txt
 cp .env.example .env
 # edit .env with your values
 ./bootstrap.sh
+# Required after install/update: ensure OpenClaw cron jobs are installed/active.
+./scripts/install_openclaw_crons.sh
+openclaw cron list --json
 # Optional warm-start preview (dry-run):
 # EVCLAW_ROOT="${EVCLAW_ROOT:-$PWD}" python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 ./start.sh
@@ -69,6 +72,14 @@ Default target is `~/.openclaw/skills` (override with `EVCLAW_OPENCLAW_SKILLS_DI
 - `evclaw-exit-decider`
 - `evclaw-hip3-exit-decider`
 - `evclaw-learning-reflector`
+
+Cron install is critical:
+- `bootstrap.sh` attempts cron install automatically.
+- Always run `./scripts/install_openclaw_crons.sh` manually after fresh setup or git update.
+- Verify `openclaw cron list --json` contains both:
+  - `EVClaw AGI Trader Hourly (deterministic)`
+  - `EVClaw AGI Trader Hourly Report (system-event)`
+- If jobs are missing, deterministic safety checks and repo update notifications will not run.
 
 ## Optional: import historical learning (opt-in)
 
@@ -215,7 +226,7 @@ Command split:
 
 Operator note:
 - This section is manual/interactive guidance.
-- Scheduled cron jobs must use `AGENTS.md` `CRON_CONTEXT` only.
+- Scheduled cron jobs must use `AGENTS.md` `AGI_SUPERVISOR_MODE` + `Tool.md` `CRON_SAFE_TOOLS` only.
 
 ## Operations and health
 
@@ -233,6 +244,7 @@ Operator note:
 - If `HYPERLIQUID_API` appears in your `.env`, remove it and use `HYPERLIQUID_AGENT_PRIVATE_KEY`.
 - If you see `sr_limit_equity_missing`, check that `evclaw-live-monitor` is running (it writes `monitor_snapshots` used for SR-limit equity caps).
 - If processes are missing, run `./start.sh` again and inspect tmux sessions.
+- If OpenClaw cron jobs are missing (`openclaw cron list --json` shows no EVClaw jobs), run `./scripts/install_openclaw_crons.sh` and re-check.
 
 ## Safety notice
 
