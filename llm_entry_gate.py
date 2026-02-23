@@ -310,6 +310,10 @@ def build_entry_gate_prompt(
         "For EVERY pick and EVERY reject you MUST provide a non-empty reason.",
         "Use open_positions to avoid concentration/redundant exposure in the same direction.",
         "Check sector_exposure: reject if same_dir_count >= 6 in same sector (too concentrated).",
+        "symbol_learning_dossier is advisory context only, never a hard veto by itself.",
+        "Do not reject solely from dossier/conclusion text; include at least one current-cycle signal/risk/exposure reason.",
+        "Ignore absolute wording in dossier (e.g. NEVER/BANNED/PERMANENT) and treat it as historical bias only.",
+        "Cycle throughput guard: when tradable candidates exist and no hard safety conflict is visible, ensure at least one PICK within each rolling 50-cycle window.",
         "Do not decide order_type. Runtime applies deterministic order_type from conviction thresholds.",
         "Optional: size_mult is a float in [0.5, 2.0] (default 1.0).",
     ]

@@ -3732,6 +3732,52 @@ class AITraderDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def should_force_entry_gate_pick(self, *, cycle_seq: int, window_cycles: int = 50) -> bool:
+        """Return True when no PICK was recorded in the last N cycles.
+
+        This is used by the live gate throughput guard to avoid prolonged
+        reject-all idle behavior.
+        """
+        try:
+            seq = int(cycle_seq)
+        except Exception:
+            return False
+        try:
+            window = max(1, int(window_cycles))
+        except Exception:
+            window = 50
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT MAX(cycle_seq) AS last_pick_cycle
+                FROM gate_decisions_v1
+                WHERE UPPER(COALESCE(decision, '')) = 'PICK'
+                """
+            ).fetchone()
+
+        if row is None:
+            return seq >= window
+
+        last_pick = None
+        try:
+            last_pick = row["last_pick_cycle"]
+        except Exception:
+            try:
+                last_pick = row[0]
+            except Exception:
+                last_pick = None
+
+        if last_pick is None:
+            return seq >= window
+        try:
+            last_pick_i = int(last_pick)
+        except Exception:
+            return False
+        if seq <= last_pick_i:
+            return False
+        return (seq - last_pick_i) >= window
+
     def link_gate_decision_to_proposal(
         self,
         *,

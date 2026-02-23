@@ -107,6 +107,19 @@ Cons:
 - Usually fewer trades than fresh-start profile.
 - If many users import the same seed, behavior can converge.
 
+Optional maintenance: prune stale learning text/conclusions
+```bash
+EVCLAW_ROOT="/path/to/evclaw"
+# Dry-run (default), month window:
+python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py"
+
+# Week window:
+python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window week
+
+# Apply (conclusions + notes_summary only):
+python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window month --apply
+```
+
 ## Required EVPlus Endpoints
 EVClaw is network-first and expects EVPlus services by default:
 - Tracker SSE/API: `tracker.evplus.ai` (port `8443`, endpoint `/sse/tracker`)

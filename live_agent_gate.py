@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
@@ -284,6 +286,138 @@ def apply_llm_gate_selection(
             kept_after_gate.append(cand)
         else:
             rejected_after_gate.append(cand)
+
+    # Throughput guard: avoid prolonged full-idle LLM behavior.
+    # If gate rejects all for >= N cycles, force exactly one best eligible PICK.
+    min_pick_window_cycles = 50
+    try:
+        min_pick_window_cycles = max(
+            1,
+            int(str(os.getenv("EVCLAW_LLM_GATE_MIN_PICK_WINDOW_CYCLES", "50")).strip() or "50"),
+        )
+    except Exception:
+        min_pick_window_cycles = 50
+
+    if not kept_after_gate and rejected_after_gate:
+        should_force_pick = False
+        try:
+            if db is not None and hasattr(db, "should_force_entry_gate_pick"):
+                should_force_pick = bool(
+                    db.should_force_entry_gate_pick(
+                        cycle_seq=int(seq),
+                        window_cycles=int(min_pick_window_cycles),
+                    )
+                )
+        except Exception:
+            should_force_pick = False
+
+        if should_force_pick:
+            eligible: List[Tuple[Dict[str, Any], str, float]] = []
+            for cand in rejected_after_gate:
+                blended_conv = safe_float_fn(cand.get("blended_conviction", cand.get("conviction")), 0.0)
+                ot = str(resolve_order_type_fn(blended_conv, config=conviction_config) or "reject").strip().lower()
+                if ot in {"limit", "chase_limit"}:
+                    eligible.append((cand, ot, blended_conv))
+
+            if eligible:
+                def _pick_sort_key(item: Tuple[Dict[str, Any], str, float]) -> Tuple[float, float]:
+                    c, _ot, blended = item
+                    rank = c.get("rank")
+                    try:
+                        rank_num = int(rank)
+                    except Exception:
+                        rank_num = 10**9
+                    return (float(blended), float(-rank_num))
+
+                forced_cand, forced_order_type, forced_conv = max(eligible, key=_pick_sort_key)
+                forced_reason = f"forced_min_pick_window_{int(min_pick_window_cycles)}_cycles"
+                forced_key = (
+                    str(forced_cand.get("symbol") or "").upper(),
+                    str(forced_cand.get("direction") or "").upper(),
+                )
+                rej_meta = reject_map.get(forced_key) or {}
+                llm_agent_id_row = str(rej_meta.get("agent_id") or llm_agent_id or "").strip() or None
+                llm_model_row = str(rej_meta.get("model") or llm_model or "").strip() or None
+                llm_session_id_row = str(rej_meta.get("session_id") or llm_session_id or "").strip() or None
+
+                gate_decision_id = None
+                try:
+                    if db is not None and hasattr(db, "insert_gate_decision"):
+                        gate_decision_id = db.insert_gate_decision(
+                            cycle_seq=int(seq),
+                            symbol=forced_key[0],
+                            direction=forced_key[1],
+                            decision="PICK",
+                            reason=forced_reason,
+                            candidate_rank=(
+                                int(forced_cand.get("rank"))
+                                if forced_cand.get("rank") is not None
+                                else None
+                            ),
+                            conviction=safe_float_fn(forced_cand.get("conviction"), 0.0),
+                            blended_conviction=forced_conv,
+                            pipeline_conviction=safe_float_fn(
+                                forced_cand.get("pipeline_conviction", forced_cand.get("conviction")),
+                                0.0,
+                            ),
+                            brain_conviction=safe_float_fn(forced_cand.get("brain_conviction"), 0.0),
+                            llm_agent_id=llm_agent_id_row,
+                            llm_model=llm_model_row,
+                            llm_session_id=llm_session_id_row,
+                        )
+                except Exception:
+                    gate_decision_id = None
+
+                if gate_decision_id is not None:
+                    try:
+                        forced_cand["gate_decision_id"] = int(gate_decision_id)
+                    except Exception:
+                        forced_cand["gate_decision_id"] = gate_decision_id
+                if llm_session_id_row:
+                    forced_cand["gate_session_id"] = llm_session_id_row
+                forced_cand["gate_decision_reason"] = forced_reason
+                forced_cand["llm_pick_reason"] = forced_reason
+                forced_cand["llm_size_mult"] = 1.0
+
+                gate_mode = str(forced_cand.get("gate_mode") or "").strip().lower()
+                if gate_mode not in {"hip3", "normal"}:
+                    gate_mode = "hip3" if forced_key[0].startswith("XYZ:") else "normal"
+                forced_cand["gate_mode"] = gate_mode
+                forced_cand["entry_gate_mode"] = gate_mode
+
+                try:
+                    forced_cand["execution"] = dict(forced_cand.get("execution") or {})
+                    forced_cand["execution"].update(
+                        {
+                            "source": "llm_gate_forced_min_pick",
+                            "order_type": forced_order_type,
+                            "pick_reason": forced_reason,
+                            "size_mult": 1.0,
+                            "conviction_source": "blended",
+                            "blended_conviction": forced_conv,
+                            "gate_mode": gate_mode,
+                        }
+                    )
+                    if forced_order_type == "limit":
+                        forced_cand["execution"].update(
+                            {
+                                "limit_style": "sr_limit",
+                                "limit_fallback": "atr_1x",
+                            }
+                        )
+                except Exception:
+                    pass
+
+                kept_after_gate.append(forced_cand)
+                rejected_after_gate = [c for c in rejected_after_gate if c is not forced_cand]
+                if isinstance(gate_summary, dict):
+                    gate_summary["forced_pick"] = {
+                        "enabled": True,
+                        "reason": forced_reason,
+                        "window_cycles": int(min_pick_window_cycles),
+                        "symbol": forced_key[0],
+                        "direction": forced_key[1],
+                    }
 
     for cand in rejected_after_gate:
         k = (str(cand.get("symbol") or "").upper(), str(cand.get("direction") or "").upper())

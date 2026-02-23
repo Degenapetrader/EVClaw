@@ -56,6 +56,7 @@ DB: $DB_PATH
 
 Run:
 0) Read ONLY AGENTS supervisor block in $AGENTS_PATH (between AGI_SUPERVISOR_MODE_START and AGI_SUPERVISOR_MODE_END). Ignore MANUAL_COMMANDS section.
+0.1) Read ONLY Tool.md CRON_SAFE_TOOLS block (between CRON_SAFE_TOOLS_START and CRON_SAFE_TOOLS_END).
 1) cd $ROOT_DIR && $EVCLAW_PYTHON hourly_ops.py --db $DB_PATH --json-out $REPORT_PATH --summary-out $SUMMARY_PATH
 2) Read and return ONLY summary lines from $SUMMARY_PATH (max 4 lines).
 3) If runner exits non-zero, report failure and include top error from $REPORT_PATH.
@@ -77,6 +78,7 @@ Repo update changelog: $UPDATE_CHANGELOG_MD_PATH
 
 Read report + summary and post a compact operational check:
 0) Read ONLY AGENTS supervisor block in $AGENTS_PATH (between AGI_SUPERVISOR_MODE_START and AGI_SUPERVISOR_MODE_END). Ignore MANUAL_COMMANDS section.
+0.1) Read ONLY Tool.md CRON_SAFE_TOOLS block (between CRON_SAFE_TOOLS_START and CRON_SAFE_TOOLS_END).
 1) cd $ROOT_DIR && $EVCLAW_PYTHON scripts/check_repo_update.py --json-out $UPDATE_REPORT_PATH --summary-out $UPDATE_SUMMARY_PATH --changelog-md-out $UPDATE_CHANGELOG_MD_PATH
 2) Confirm latest deterministic run freshness and status.
 3) Confirm key counters (open_trades, pending_limit_cancels, unprotected_perps, unprotected_builder, protection_unknown).

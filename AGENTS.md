@@ -16,6 +16,12 @@ Purpose: compact runtime contract for AI agents/operators working in this repo.
 - `run_fill_reconciler.py`: fill tracking + reconciliation.
 - `live_monitor.py`: equity snapshots used by SR/equity safety checks.
 
+## Tool map contract
+- Canonical tool routing and usage are defined in `Tool.md`.
+- For manual/advisor turns, follow `Tool.md` and `MANUAL_COMMANDS` together.
+- For scheduled cron turns, follow `CRON_CONTEXT` plus `Tool.md` `CRON_SAFE_TOOLS` block only.
+- Do not invent command syntax; use the exact command forms documented in `Tool.md`.
+
 Runtime artifacts:
 - DB: `${EVCLAW_DB_PATH:-./ai_trader.db}`
 - Ops JSON: `${EVCLAW_RUNTIME_DIR:-./state}/hourly_ops_report.json`
@@ -116,6 +122,7 @@ Repo update policy (hourly report):
   "Update available for EVClaw. Do you want to update now? (yes/no)"
 - Update is always user-decision only.
 - Never run `git pull`, `bootstrap.sh`, `start.sh`, or `restart.sh` from cron without explicit user approval.
+- Use `Tool.md` `CRON_SAFE_TOOLS` block for command routing and allowed tool surface in scheduled turns.
 
 Non-overlap rule:
 - This block is the single source of truth for scheduled supervisor behavior.

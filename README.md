@@ -111,6 +111,22 @@ Cons:
 - Usually fewer trades than a fresh start profile.
 - If many users import the same seed, behavior can become similar across users.
 
+Optional maintenance: prune stale learning text/conclusions
+```bash
+EVCLAW_ROOT="/path/to/EVClaw"
+# Dry-run (default), month window:
+python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py"
+
+# Week window:
+python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window week
+
+# Apply (conclusions + notes_summary only):
+python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window month --apply
+
+# Optional deeper cleanup (also delete stale reflections rows):
+python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window month --include-reflections --apply
+```
+
 ## Required environment variables
 
 At minimum set:
