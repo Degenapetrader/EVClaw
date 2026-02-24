@@ -138,6 +138,15 @@ python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window month --apply
 python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window month --include-reflections --apply
 ```
 
+Optional maintenance: cleanup Python/npm caches (dry-run default)
+```bash
+EVCLAW_ROOT="/path/to/EVClaw"
+python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py"
+python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py" --apply
+python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py" --npm-cache
+python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py" --apply --npm-cache --npm-cache-clean
+```
+
 ## Required environment variables
 
 At minimum set:
@@ -152,6 +161,12 @@ Common network defaults:
 - tracker SSE host: `tracker.evplus.ai:8443`
 - HL private node/info endpoint: `https://node2.evplus.ai/evclaw/info` (as configured in `.env`)
 - Before first run, approve builder fee for your wallet: `https://atsetup.evplus.ai/`
+
+HIP3 enablement (currently `xyz:SYMBOL` only):
+- `EVCLAW_ENABLED_VENUES=hyperliquid,hip3`
+- `EVCLAW_HIP3_TRADING_ENABLED=1`
+- `EVCLAW_HIP3_DEXES=xyz`
+- Symbols outside `xyz:*` are not supported for HIP3 trading yet.
 
 Node2 auth test (RIGHT way):
 ```bash
@@ -234,6 +249,8 @@ Operator note:
 - OpenClaw hourly report cron posts a status summary to main chat.
 - Hourly report cron also runs deterministic repo update check and asks user for explicit yes/no before any update action.
 - Health/ops output is written to local runtime files and logs.
+- Cycle/context/candidate artifacts are pruned every cycle by `cycle_trigger.py`.
+- Retention is fixed in code to keep last `50` files per artifact class (safety floor: `20`).
 
 ## Troubleshooting
 

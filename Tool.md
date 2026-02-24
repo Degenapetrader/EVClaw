@@ -5,6 +5,7 @@ Purpose: single source of truth for what command/tool to run, when to run it, an
 Scope:
 - Manual/advisor user commands (`/trade`, `/best3`, `/execute`, `/hedge`, `/stats`)
 - Deterministic ops tools (`hourly_ops.py`, repo update check, learning import/prune)
+- Runtime cache cleanup helper (`scripts/cleanup_runtime_artifacts.py`)
 
 Rules:
 - Use exact command forms below. Do not invent syntax.
@@ -152,6 +153,18 @@ python3 scripts/prune_stale_learning.py --window month --include-reflections --a
 ```
 - Code truth:
 `scripts/prune_stale_learning.py:2`, `scripts/prune_stale_learning.py:52`, `scripts/prune_stale_learning.py:60`, `scripts/prune_stale_learning.py:64`, `scripts/prune_stale_learning.py:163`, `scripts/prune_stale_learning.py:172`, `scripts/prune_stale_learning.py:186`.
+
+`scripts/cleanup_runtime_artifacts.py`
+- When to use: optional cache cleanup on user VPS (`__pycache__`, `.pyc/.pyo`, optional npm cache).
+- Safety: defaults to dry-run. Use `--apply` to execute.
+- Commands:
+```bash
+python3 scripts/cleanup_runtime_artifacts.py
+python3 scripts/cleanup_runtime_artifacts.py --apply
+python3 scripts/cleanup_runtime_artifacts.py --npm-cache
+python3 scripts/cleanup_runtime_artifacts.py --apply --npm-cache --npm-cache-clean
+```
+- Note: cycle/context/candidate runtime artifacts are already auto-pruned by `cycle_trigger.py` (fixed keep `50`, floor `20`).
 
 ## CRON_SAFE_TOOLS_START
 - Allowed commands in scheduled jobs:

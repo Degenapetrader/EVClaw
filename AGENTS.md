@@ -36,6 +36,8 @@ Runtime artifacts:
 - DB: `${EVCLAW_DB_PATH:-./ai_trader.db}`
 - Ops JSON: `${EVCLAW_RUNTIME_DIR:-./state}/hourly_ops_report.json`
 - Ops summary: `${EVCLAW_RUNTIME_DIR:-./state}/hourly_ops_summary.txt`
+- Cycle/context/candidate artifacts are auto-pruned by `cycle_trigger.py` every cycle.
+- Retention is fixed in code to keep last `50` files per class (safety floor: `20`).
 
 ## AGI flow contract (high level)
 - Entry: cycle trigger -> context -> entry gate -> executor.
@@ -71,6 +73,15 @@ Canonical payload templates:
 - Meta: `{"type":"meta"}`
 
 Do not invent payload keys/endpoints.
+
+## HIP3 operator contract (strict)
+- Supported HIP3 symbol scope is currently `xyz:SYMBOL` only.
+- Required config for HIP3 trading:
+  - `EVCLAW_ENABLED_VENUES=hyperliquid,hip3`
+  - `EVCLAW_HIP3_TRADING_ENABLED=1`
+  - `EVCLAW_HIP3_DEXES=xyz`
+- Before diagnosing "no HIP3 trades", verify those env keys first, then auth/approval, then signal presence (`hip3_main`).
+- Non-`xyz:*` HIP3 requests should be treated as unsupported in current EVClaw.
 
 ## Failure map (quick)
 - `401/403` node2/tracker auth: wallet not approved/authorized (builder approval flow).

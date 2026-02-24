@@ -56,6 +56,17 @@ Optional Lighter dependency install:
 
 `bootstrap.sh` auto-sets `EVCLAW_ROOT` in `.env` to the current repo path so path-dependent defaults stay portable on any machine/location.
 
+## Optional HIP3 enablement (current scope: `xyz:SYMBOL` only)
+Update `.env`:
+- `EVCLAW_ENABLED_VENUES=hyperliquid,hip3`
+- `EVCLAW_HIP3_TRADING_ENABLED=1`
+- `EVCLAW_HIP3_DEXES=xyz`
+
+Notes:
+- Current HIP3 trading support is only for `xyz:*` symbols.
+- Symbols outside `xyz:*` are out of scope for HIP3 right now.
+- Approve builder fee first: `https://atsetup.evplus.ai/`.
+
 ## Optional learning warm-start (user-consent only)
 Not included in bootstrap by design.
 Core learning state is carried in `learning_state_kv` (`patterns`/`adjustments`) rather than `pattern_stats`.
@@ -120,6 +131,15 @@ python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window week
 python3 "$EVCLAW_ROOT/scripts/prune_stale_learning.py" --window month --apply
 ```
 
+Optional maintenance: cleanup Python/npm caches (dry-run default)
+```bash
+EVCLAW_ROOT="/path/to/evclaw"
+python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py"
+python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py" --apply
+python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py" --npm-cache
+python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py" --apply --npm-cache --npm-cache-clean
+```
+
 ## Required EVPlus Endpoints
 EVClaw is network-first and expects EVPlus services by default:
 - Tracker SSE/API: `tracker.evplus.ai` (port `8443`, endpoint `/sse/tracker`)
@@ -169,6 +189,10 @@ bash _agi_flow_healthcheck.sh
 tmux capture-pane -pt evclaw-cycle-trigger -S -80 | tail -n 40
 tmux capture-pane -pt evclaw-live-agent -S -80 | tail -n 40
 ```
+
+Runtime retention note:
+- `cycle_trigger.py` prunes cycle/context/candidate artifacts every cycle.
+- Retention is fixed in code to keep the last `50` files per class (safety floor: `20`).
 
 ## Troubleshooting
 - `openclaw` errors:

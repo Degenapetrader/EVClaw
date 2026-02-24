@@ -261,10 +261,9 @@ HIP3_MAX_EMITS_PER_SNAPSHOT = env_int(
     "EVCLAW_HIP3_MAX_EMITS_PER_SNAPSHOT",
     3,
 )
-CYCLE_FILES_KEEP_N = env_int(
-    "EVCLAW_CYCLE_FILES_KEEP_N",
-    200,
-)
+# Runtime artifact retention (fixed default).
+# Keep this deterministic for all users; do not override via .env.
+CYCLE_FILES_KEEP_N = 50
 HIP3_FLOW_SL_ATR_MULT = _skill_float(_HIP3_CFG, "flow_sl_atr_mult", 1.4)
 HIP3_FLOW_TP_ATR_MULT = _skill_float(_HIP3_CFG, "flow_tp_atr_mult", 2.0)
 HIP3_OFM_SL_ATR_MULT = _skill_float(_HIP3_CFG, "ofm_sl_atr_mult", 1.8)
@@ -330,7 +329,7 @@ class CycleConfig:
             hip3_max_emits_per_snapshot=max(1, env_int("EVCLAW_HIP3_MAX_EMITS_PER_SNAPSHOT", HIP3_MAX_EMITS_PER_SNAPSHOT)),
             hip3_cache_ttl_sec=HIP3_CACHE_TTL_SEC,
             hip3_cache_max=env_int("EVCLAW_HIP3_CACHE_MAX", 2000),
-            cycle_files_keep_n=max(20, env_int("EVCLAW_CYCLE_FILES_KEEP_N", CYCLE_FILES_KEEP_N)),
+            cycle_files_keep_n=CYCLE_FILES_KEEP_N,
             hip3_flow_ofm_stats_enabled=HIP3_FLOW_OFM_STATS_ENABLED,
             hip3_flow_ofm_stats_window_sec=HIP3_FLOW_OFM_STATS_WINDOW_SEC,
             hip3_flow_ofm_stats_write_min_interval_sec=HIP3_FLOW_OFM_STATS_WRITE_MIN_INTERVAL_SEC,

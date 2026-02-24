@@ -55,15 +55,6 @@ export EVCLAW_PYTHON
 echo "Installing core dependencies (using $EVCLAW_PYTHON)..."
 "$EVCLAW_PYTHON" -m pip install -r requirements.txt
 
-if [[ "${EVCLAW_INSTALL_LIGHTER_DEPS:-0}" == "1" || "${EVCLAW_INSTALL_LIGHTER_DEPS:-}" == "true" || "${EVCLAW_INSTALL_LIGHTER_DEPS:-}" == "yes" ]]; then
-  if [[ -f requirements-lighter.txt ]]; then
-    echo "Installing optional Lighter dependencies..."
-    "$EVCLAW_PYTHON" -m pip install -r requirements-lighter.txt
-  else
-    echo "Optional Lighter dependency file not found: requirements-lighter.txt" >&2
-  fi
-fi
-
 verify_core_python_deps() {
   "$EVCLAW_PYTHON" - <<'PY'
 import importlib
@@ -273,6 +264,19 @@ remind_learning_seed_option() {
   echo "Note: symbol_policy rows are optional and may be 0 for some seed versions."
 }
 
+remind_hip3_and_retention() {
+  echo "Optional HIP3 enablement (currently xyz:SYMBOL only):"
+  echo "  EVCLAW_ENABLED_VENUES=hyperliquid,hip3"
+  echo "  EVCLAW_HIP3_TRADING_ENABLED=1"
+  echo "  EVCLAW_HIP3_DEXES=xyz"
+  echo "Verify in .env:"
+  echo "  grep '^EVCLAW_ENABLED_VENUES=' .env"
+  echo "  grep '^EVCLAW_HIP3_TRADING_ENABLED=' .env"
+  echo "  grep '^EVCLAW_HIP3_DEXES=' .env"
+  echo "Runtime cleanup note: cycle/context/candidate artifacts are pruned every cycle."
+  echo "Retention is fixed to keep last 50 files per class (safety floor: 20)."
+}
+
 ensure_openclaw_cli() {
   if ! command -v openclaw >/dev/null 2>&1; then
     echo "openclaw is required but was not found in PATH." >&2
@@ -378,6 +382,7 @@ install_openclaw_helper_skills
 warn_if_missing_runtime_env
 remind_builder_approval
 remind_learning_seed_option
+remind_hip3_and_retention
 
 mkdir -p state memory signals docs
 
