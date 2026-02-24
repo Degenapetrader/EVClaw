@@ -1719,7 +1719,7 @@ def _load_exposure_context(
         if conn is not None:
             rows = conn.execute(
                 """
-                SELECT ts, ts_iso, hl_equity, hl_net_notional
+                SELECT ts, ts_iso, hl_equity, hl_net_notional, hl_wallet_equity
                 FROM monitor_snapshots
                 ORDER BY ts DESC
                 LIMIT 2
@@ -1729,7 +1729,7 @@ def _load_exposure_context(
             with _db_connect(db_path) as local_conn:
                 rows = local_conn.execute(
                     """
-                    SELECT ts, ts_iso, hl_equity, hl_net_notional
+                    SELECT ts, ts_iso, hl_equity, hl_net_notional, hl_wallet_equity
                     FROM monitor_snapshots
                     ORDER BY ts DESC
                     LIMIT 2
@@ -1739,6 +1739,9 @@ def _load_exposure_context(
             try:
                 snap_ts = float((r["ts"] if isinstance(r, sqlite3.Row) else r[0]) or 0.0)
                 hl_eq = float((r["hl_equity"] if isinstance(r, sqlite3.Row) else r[2]) or 0.0)
+                # Fallback to hl_wallet_equity if hl_equity is too low
+                if hl_eq <= 0:
+                    hl_eq = float((r["hl_wallet_equity"] if isinstance(r, sqlite3.Row) else r[4]) or 0.0)
                 hl_net = float((r["hl_net_notional"] if isinstance(r, sqlite3.Row) else r[3]) or 0.0)
             except Exception:
                 continue
