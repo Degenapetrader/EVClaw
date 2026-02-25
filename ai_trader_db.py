@@ -4224,12 +4224,32 @@ class AITraderDB:
 
     def get_latest_equity(self, venue: str) -> Optional[float]:
         """Return latest equity for a venue ('hyperliquid', 'hip3', or 'lighter')."""
-        snapshot = self.get_latest_monitor_snapshot()
+        # Backward compatible: try query with hl_wallet_equity, fallback if column missing
+        snapshot = None
+        try:
+            snapshot = self._get_connection().execute(
+                "SELECT ts, hl_equity, hl_wallet_equity FROM monitor_snapshots ORDER BY ts DESC LIMIT 1"
+            ).fetchone()
+            snapshot = dict(snapshot) if snapshot else None
+        except sqlite3.OperationalError:
+            # Column doesn't exist in old DBs - fall back to basic query
+            snapshot = self.get_latest_monitor_snapshot()
+        
         if not snapshot:
             return None
         venue_key = str(venue or "").lower()
         if venue_key in ("hyperliquid", "hl"):
-            return snapshot.get("hl_equity")
+            # Use max of perps equity and wallet equity to avoid tiny-position bug
+            hl_eq = snapshot.get("hl_equity")
+            hl_wallet_eq = snapshot.get("hl_wallet_equity")
+            if hl_eq is not None and hl_wallet_eq is not None:
+                return max(float(hl_eq), float(hl_wallet_eq))
+            # Handle case where only one field exists (including 0.0)
+            if hl_wallet_eq is not None:
+                return float(hl_wallet_eq)
+            if hl_eq is not None:
+                return float(hl_eq)
+            return None
         if venue_key in ("hip3", "hl_wallet", "wallet", "hyperliquid_wallet"):
             return snapshot.get("hl_wallet_equity") or snapshot.get("hip3_equity")
         if venue_key in ("lighter", "lt"):

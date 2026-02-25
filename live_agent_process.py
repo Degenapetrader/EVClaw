@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import time
@@ -652,9 +653,10 @@ async def process_candidates_impl(
 
         # Hard net-exposure cap (per Degen): cap |HL net notional| to equity * mult.
         max_net_exposure_mult = _cfg_float(exposure_cfg, "max_net_exposure_mult", 2.0)
-        if max_net_exposure_mult <= 0:
+        # Safety: fallback to default if invalid (NaN, inf, <=0)
+        if not isinstance(max_net_exposure_mult, (int, float)) or not math.isfinite(max_net_exposure_mult) or max_net_exposure_mult <= 0:
             print(
-                "Warning: config.exposure.max_net_exposure_mult<=0 disables exposure caps; "
+                f"Warning: config.exposure.max_net_exposure_mult={max_net_exposure_mult} invalid; "
                 "falling back to 2.0"
             )
             max_net_exposure_mult = 2.0
@@ -662,7 +664,19 @@ async def process_candidates_impl(
         hl_net_cap = None
         lighter_net_notional = None
         try:
-            snapshot = await _run_db_call(db.get_latest_monitor_snapshot)
+            # Backward compatible: try query with hl_wallet_equity, fallback if column missing
+            try:
+                snapshot = await _run_db_call(
+                    lambda: db._get_connection().execute(
+                        "SELECT * FROM monitor_snapshots ORDER BY ts DESC LIMIT 1"
+                    ).fetchone()
+                )
+                if snapshot:
+                    snapshot = dict(snapshot)
+            except sqlite3.OperationalError:
+                # Column doesn't exist in old DBs
+                snapshot = await _run_db_call(db.get_latest_monitor_snapshot)
+            
             if snapshot:
                 hl_net = float(snapshot.get("hl_net_notional") or 0.0)
                 if hl_net == 0.0:
@@ -673,10 +687,14 @@ async def process_candidates_impl(
                 hl_net_notional = hl_net
                 lighter_net_notional = lt_net
                 # Use merged Hyperliquid equity for both Hyperliquid views.
+                # Use max(perps_equity, wallet_equity) to handle tiny-positive hl_equity bug
                 try:
-                    hl_eq_for_cap = float(snapshot.get("hl_equity") or 0.0)
-                    if hl_eq_for_cap <= 0:
-                        hl_eq_for_cap = float(snapshot.get("hl_wallet_equity") or 0.0)
+                    hl_eq = snapshot.get("hl_equity")
+                    hl_wallet_eq = snapshot.get("hl_wallet_equity")
+                    if hl_eq is not None and hl_wallet_eq is not None:
+                        hl_eq_for_cap = max(float(hl_eq), float(hl_wallet_eq))
+                    else:
+                        hl_eq_for_cap = float(hl_wallet_eq or hl_eq or 0.0)
                 except Exception:
                     hl_eq_for_cap = 0.0
                 if hl_eq_for_cap > 0 and max_net_exposure_mult > 0:
