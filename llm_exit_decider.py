@@ -32,6 +32,7 @@ import fcntl
 import hashlib
 import json
 import logging
+import math
 import os
 import sqlite3
 import sys
@@ -1711,7 +1712,11 @@ def _load_exposure_context(
     Uses latest snapshot; if missing tries previous snapshot; if still missing returns {}.
     """
     ctx: Dict[str, Any] = {}
-    max_mult = float(EXIT_MAX_NET_EXPOSURE_MULT if EXIT_MAX_NET_EXPOSURE_MULT > 0 else 2.0)
+    max_mult = float(
+        EXIT_MAX_NET_EXPOSURE_MULT
+        if math.isfinite(EXIT_MAX_NET_EXPOSURE_MULT) and EXIT_MAX_NET_EXPOSURE_MULT > 0
+        else 2.0
+    )
     max_age_sec = max(0.0, float(max_age_sec))
     now_ts = time.time()
 
