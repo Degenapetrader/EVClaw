@@ -234,43 +234,6 @@ class LearningEngine(EnhancedLearningEngine):
         except Exception as e:
             self.log.warning(f"Failed to ensure learning_state_kv table: {e}")
 
-    def _processed_trade_key(self, trade_id: int) -> str:
-        return f"processed_trade:{int(trade_id)}"
-
-    def _is_trade_processed(self, trade_id: int) -> bool:
-        try:
-            with self._db_conn() as conn:
-                row = conn.execute(
-                    "SELECT 1 FROM learning_state_kv WHERE key = ? LIMIT 1",
-                    (self._processed_trade_key(int(trade_id)),),
-                ).fetchone()
-                return row is not None
-        except Exception as e:
-            self.log.warning(f"Failed processed-trade check for {trade_id}: {e}")
-            return False
-
-    def _mark_trade_processed(self, trade_id: int) -> None:
-        try:
-            now_ts = time.time()
-            with self._db_conn() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO learning_state_kv(key, value_json, updated_at)
-                    VALUES(?, ?, ?)
-                    ON CONFLICT(key) DO UPDATE SET
-                        value_json=excluded.value_json,
-                        updated_at=excluded.updated_at
-                    """,
-                    (
-                        self._processed_trade_key(int(trade_id)),
-                        json.dumps({"processed": True, "trade_id": int(trade_id)}, separators=(",", ":")),
-                        now_ts,
-                    ),
-                )
-                conn.commit()
-        except Exception as e:
-            self.log.warning(f"Failed to mark trade {trade_id} processed: {e}")
-
     def _bounded_step(self, current: float, target: float) -> float:
         """Bound a multiplier update to avoid one-step jumps on sparse data."""
         cur = float(current)
@@ -1084,11 +1047,6 @@ class LearningEngine(EnhancedLearningEngine):
 
         Call this from fill_reconciler when a trade is closed.
         """
-        trade_id = int(trade_id)
-        if self._is_trade_processed(trade_id):
-            self.log.debug(f"Learning already processed for trade {trade_id}; skipping")
-            return
-
         # Parent handles combo stats.
         await super().process_closed_trade(trade_id)
 
@@ -1143,7 +1101,6 @@ class LearningEngine(EnhancedLearningEngine):
         if state_changed:
             self.save_state()
 
-        self._mark_trade_processed(trade_id)
         self.log.debug(f"Full learning pipeline complete for trade {trade_id}")
 
     # =========================================================================

@@ -541,14 +541,6 @@ async def process_one_task(
             created_at=time.time(),
         )
 
-        # Ingest closed-trade learnings into learning_state_kv (mistakes/patterns/adjustments).
-        try:
-            from learning_engine import LearningEngine
-
-            await LearningEngine(db_path=db_path).process_closed_trade(int(trade_id))
-        except Exception as exc:
-            LOG.warning("learning ingestion failed trade_id=%s: %s", trade_id, exc)
-
         # Merge new reflection snippets into symbol_learning_state.notes_summary
         try:
             from learning_dossier_aggregator import update_from_new_reflections
