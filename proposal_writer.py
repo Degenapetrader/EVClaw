@@ -128,12 +128,32 @@ def insert_proposals(
     context_snapshot = dict(context_snapshot) if isinstance(context_snapshot, dict) else context_snapshot
     risk_meta = candidate.get("risk")
     risk_meta = dict(risk_meta) if isinstance(risk_meta, dict) else {}
+    gate_execution_type = str(
+        candidate.get("entry_gate_execution_type")
+        or risk_meta.get("entry_gate_execution_type")
+        or ""
+    ).strip().lower()
+    if gate_execution_type not in {"llm", "bypass", "deterministic"}:
+        gate_execution_type = ""
+    gate_bypass_reason = str(
+        candidate.get("entry_gate_bypass_reason")
+        or risk_meta.get("entry_gate_bypass_reason")
+        or ""
+    ).strip() or None
     if gate_mode and "entry_gate_mode" not in risk_meta:
         risk_meta["entry_gate_mode"] = gate_mode
     if gate_mode and "gate_mode" not in risk_meta:
         risk_meta["gate_mode"] = gate_mode
+    if gate_execution_type and "entry_gate_execution_type" not in risk_meta:
+        risk_meta["entry_gate_execution_type"] = gate_execution_type
+    if gate_bypass_reason and "entry_gate_bypass_reason" not in risk_meta:
+        risk_meta["entry_gate_bypass_reason"] = gate_bypass_reason
     if isinstance(context_snapshot, dict):
         context_snapshot.setdefault("entry_gate_mode", gate_mode)
+        if gate_execution_type:
+            context_snapshot.setdefault("entry_gate_execution_type", gate_execution_type)
+        if gate_bypass_reason:
+            context_snapshot.setdefault("entry_gate_bypass_reason", gate_bypass_reason)
         context_snapshot.setdefault("strategy_segment", strategy_segment)
         context_risk = context_snapshot.get("risk")
         context_risk = dict(context_risk) if isinstance(context_risk, dict) else {}
@@ -141,6 +161,22 @@ def insert_proposals(
             context_risk.setdefault(key, value)
         if context_risk:
             context_snapshot["risk"] = context_risk
+        entry_gate_obj = context_snapshot.get("entry_gate")
+        entry_gate_obj = dict(entry_gate_obj) if isinstance(entry_gate_obj, dict) else {}
+        if gate_mode and "gate_mode" not in entry_gate_obj:
+            entry_gate_obj["gate_mode"] = gate_mode
+        if gate_execution_type and "gate_type" not in entry_gate_obj:
+            entry_gate_obj["gate_type"] = gate_execution_type
+        if gate_decision_id is not None and "gate_decision_id" not in entry_gate_obj:
+            entry_gate_obj["gate_decision_id"] = gate_decision_id
+        if gate_session_id and "gate_session_id" not in entry_gate_obj:
+            entry_gate_obj["gate_session_id"] = gate_session_id
+        if gate_decision_reason and "gate_decision_reason" not in entry_gate_obj:
+            entry_gate_obj["gate_decision_reason"] = gate_decision_reason
+        if gate_bypass_reason and "bypass_reason" not in entry_gate_obj:
+            entry_gate_obj["bypass_reason"] = gate_bypass_reason
+        if entry_gate_obj:
+            context_snapshot["entry_gate"] = entry_gate_obj
 
     meta = {
         "strong_signals": candidate.get("strong_signals"),
@@ -161,6 +197,8 @@ def insert_proposals(
         "gate_decision_id": gate_decision_id,
         "gate_session_id": gate_session_id,
         "gate_decision_reason": gate_decision_reason,
+        "gate_execution_type": gate_execution_type or None,
+        "gate_bypass_reason": gate_bypass_reason,
         # Audit helpers for approvals/rejections
         "approve_reason": reason_short or None,
         "reject_reason": reason

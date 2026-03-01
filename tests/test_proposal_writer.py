@@ -204,3 +204,34 @@ def test_insert_proposals_links_gate_decision_to_proposal_row() -> None:
     assert int(gate_row["id"]) == int(gate_decision_id)
     assert int(gate_row["proposal_id"] or 0) == int(proposal_id)
     assert str(gate_row["venue"] or "").lower() == "hyperliquid"
+
+
+def test_insert_proposals_persists_bypass_gate_attribution() -> None:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db = AITraderDB(f.name)
+
+    candidate = _build_candidate(conviction=0.61, execution={"order_type": "limit"})
+    candidate["gate_mode"] = "normal"
+    candidate["entry_gate_execution_type"] = "bypass"
+    candidate["entry_gate_bypass_reason"] = "normal_gate_bypassed:invalid_json:timeout"
+    candidate["risk"] = {"llm_size_mult": 1.0}
+    candidate["context_snapshot"] = {"key_metrics": {"price": 2500.0}}
+
+    proposal_ids = insert_proposals(
+        db,
+        seq=8001,
+        candidate=candidate,
+        status="PROPOSED",
+        reason=None,
+        venues=["hyperliquid"],
+    )
+    proposal_id = proposal_ids["hyperliquid"]
+    meta = db.get_proposal_metadata(proposal_id)
+
+    assert meta["gate_execution_type"] == "bypass"
+    assert "invalid_json:timeout" in str(meta["gate_bypass_reason"] or "")
+    assert meta["risk"]["entry_gate_execution_type"] == "bypass"
+    assert "invalid_json:timeout" in str(meta["risk"]["entry_gate_bypass_reason"] or "")
+    assert meta["context_snapshot"]["entry_gate_execution_type"] == "bypass"
+    assert "invalid_json:timeout" in str(meta["context_snapshot"]["entry_gate_bypass_reason"] or "")
+    assert meta["context_snapshot"]["entry_gate"]["gate_type"] == "bypass"

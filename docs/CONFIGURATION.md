@@ -155,3 +155,10 @@ ORDER BY t.exit_time DESC;
 ### Entry Gate Note
 
 Entry gate is hard-enabled in code. By default it uses OpenClaw's default agent; set `EVCLAW_LLM_GATE_AGENT_ID` (and `EVCLAW_HIP3_LLM_GATE_AGENT_ID` for HIP3 mode) to force a specific agent id. `.env` also controls model, thinking, timeout, and max-keep.
+
+### Runtime Safety Overrides (skill.yaml)
+
+- `config.global_pause.enabled`: universal pause switch for all new entries.
+- `config.entry_gate_bypass_guard`: controls deterministic fallback risk (`size_mult_cap`, rolling bypass cap, optional hard block on prolonged gate outage).
+- `config.dead_capital_reversal_guard`: blocks DEAD_CAPITAL-driven shorts during broad bullish continuation.
+- Learning pipeline skips adjustment/pattern updates for trades tagged `entry_gate_execution_type=bypass`.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Learning engine policy regressions (win/loss neutrality + symmetric updates)."""
 
+import asyncio
 import json
 import sqlite3
 import tempfile
@@ -124,3 +125,56 @@ def test_learning_engine_state_store_remains_valid_under_concurrent_updates() ->
         assert {k for k, _ in rows} == {"mistakes", "patterns", "adjustments"}
         for _, payload in rows:
             _ = json.loads(payload)
+
+
+def test_process_closed_trade_skips_adjustments_for_bypass_trade() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        eng = _mk_engine(td)
+        eng._closed_trades_for_symbol = lambda _sym: 100  # type: ignore[assignment]
+        eng._closed_trades_for_signal_direction = lambda _sig, _dir: 100  # type: ignore[assignment]
+
+        db_path = str(Path(td) / "ai_trader.db")
+        context_snapshot = json.dumps(
+            {
+                "entry_gate_execution_type": "bypass",
+                "entry_gate_bypass_reason": "normal_gate_bypassed:invalid_json:timeout",
+            }
+        )
+        signals_snapshot = json.dumps({"cvd": {"direction": "LONG", "z_score": 2.1}})
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO trades (
+                    id, symbol, direction, state, entry_time, entry_price, size, notional_usd,
+                    exit_time, exit_reason, realized_pnl, realized_pnl_pct,
+                    signals_agreed, signals_snapshot, context_snapshot
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    9001,
+                    "ETH",
+                    "LONG",
+                    "CLOSED",
+                    1000.0,
+                    2500.0,
+                    1.0,
+                    2500.0,
+                    2000.0,
+                    "SL",
+                    -50.0,
+                    -2.0,
+                    json.dumps(["cvd"]),
+                    signals_snapshot,
+                    context_snapshot,
+                ),
+            )
+            conn.commit()
+
+        asyncio.run(eng.process_closed_trade(9001))
+
+        # Mistake logging can still happen, but adaptive updates must not mutate weights.
+        assert len(eng._mistakes) == 1
+        assert eng._signal_adjustments == {}
+        assert eng._symbol_adjustments == {}
+        # Pattern updates are skipped for bypass-tagged trades.
+        assert eng._patterns == {}

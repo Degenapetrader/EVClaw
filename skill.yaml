@@ -57,6 +57,9 @@ config:
   decay:
     trend_flip_score_short: -40
     trend_flip_score_long: 40
+  global_pause:
+    enabled: false
+    reason: manual_pause
   countertrend_guard:
     enabled: true
     threshold_abs: 40
@@ -74,6 +77,25 @@ config:
     kill_switch_loss_window_hours: 12
     cooldown_hours: 8
     manual_block: false
+  dead_capital_reversal_guard:
+    enabled: true
+    # Block DEAD_CAPITAL-driven SHORTs during broad bullish continuation.
+    short_block_trend_min: 20
+    short_block_pct24h_min: 5.0
+    short_block_pct24h_z_min: 1.5
+    require_dead_capital_only: true
+    max_non_dead_confirms: 0
+  entry_gate_bypass_guard:
+    enabled: true
+    # Reduce risk during deterministic fallback.
+    size_mult_cap: 0.5
+    # Allow only N bypass entries inside rolling window.
+    window_minutes: 60
+    max_entries_per_window: 3
+    # If gate stays unreachable this long, hard-block new bypass entries.
+    hard_block_unreachable_after_minutes: 30
+    # Disabled gate is treated as deterministic by default (not bypass).
+    count_disabled_as_bypass: false
   review:
     max_closes: 3
     max_hold_records: 20

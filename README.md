@@ -162,6 +162,39 @@ Common network defaults:
 - HL private node/info endpoint: `https://node2.evplus.ai/evclaw/info` (as configured in `.env`)
 - Before first run, approve builder fee for your wallet: `https://atsetup.evplus.ai/`
 
+Tracker data contract (critical):
+- Primary real-time feed (drives trading/interrupts): `https://tracker.evplus.ai:8443/sse/tracker?key=$HYPERLIQUID_ADDRESS`
+- HIP3 REST (context/enrichment endpoints): `https://tracker.evplus.ai/api/hip3/predator-state?key=$HYPERLIQUID_ADDRESS`
+- HIP3 symbols REST: `https://tracker.evplus.ai/api/hip3-symbols?key=$HYPERLIQUID_ADDRESS`
+- If you override `EVCLAW_TRACKER_HIP3_PREDATOR_URL` or `EVCLAW_TRACKER_HIP3_SYMBOLS_URL`, include `?key=<wallet>` in the URL.
+- Do not use shortened links for HIP3 REST URLs. Use full endpoint URLs with `?key=...`.
+
+Quick endpoint checks:
+```bash
+curl -ksS "https://tracker.evplus.ai/api/hip3/predator-state?key=$HYPERLIQUID_ADDRESS" | head -c 200
+curl -ksS "https://tracker.evplus.ai/api/hip3-symbols?key=$HYPERLIQUID_ADDRESS" | head -c 200
+curl -ksS "https://tracker.evplus.ai:8443/sse/tracker?key=$HYPERLIQUID_ADDRESS" --max-time 5 | head -c 200
+```
+
+HIP3 runtime flow (AI quick map):
+1. `sse_consumer.py` connects to SSE and merges `hip3-data` into each symbol payload as `hip3_predator`.
+2. `cycle_trigger.py` consumes HIP3 snapshots from SSE and runs candidate generation on that merged payload.
+3. `compute_hip3_main()` runs OR-driver semantics: FLOW pass or OFM pass can drive; direction conflict blocks.
+4. `context_builder_v2.py` uses SSE payload first and only attempts REST enrichment if `hip3_predator` is missing.
+5. REST fetch failures are debug-logged and non-fatal; they can still reduce enrichment quality.
+
+Failure implication:
+- If both FLOW and OFM gates fail, `compute_hip3_main()` emits a `blocked_reason` (for example `missing_flow_direction`) and that symbol produces no HIP3 candidate in that snapshot.
+
+Entry-gate safety controls (AI/operator quick map):
+1. `config.global_pause.enabled=true` blocks all new entries immediately.
+2. `config.entry_gate_bypass_guard` controls deterministic fallback risk:
+   - `size_mult_cap` (default `0.5`)
+   - `max_entries_per_window` + `window_minutes`
+   - `hard_block_unreachable_after_minutes`
+3. Trades/proposals carry `entry_gate_execution_type` (`llm`, `bypass`, `deterministic`) and optional `entry_gate_bypass_reason`.
+4. Learning ignores bypass-tagged trades for signal/symbol adjustments and pattern updates.
+
 HIP3 enablement (currently `xyz:SYMBOL` only):
 - `EVCLAW_ENABLED_VENUES=hyperliquid,hip3`
 - `EVCLAW_HIP3_TRADING_ENABLED=1`
@@ -257,6 +290,10 @@ Operator note:
 - If no trades appear, verify OpenClaw agent IDs and provider config.
 - If SSE fails, verify tracker endpoint/key in `.env`.
 - If SSE/node2 returns 401/403, approve builder fee for your wallet at `https://atsetup.evplus.ai/`.
+Status guide:
+- `401`: missing/invalid wallet `key` query parameter.
+- `402`: wallet has not approved builder fee yet (SSE path).
+- `403`: wrong host/path/routing policy; re-check exact endpoint and port.
 - If HL auth fails, verify `HYPERLIQUID_ADDRESS` and `HYPERLIQUID_AGENT_PRIVATE_KEY`.
 - If `HYPERLIQUID_API` appears in your `.env`, remove it and use `HYPERLIQUID_AGENT_PRIVATE_KEY`.
 - If you see `sr_limit_equity_missing`, check that `evclaw-live-monitor` is running (it writes `monitor_snapshots` used for SR-limit equity caps).

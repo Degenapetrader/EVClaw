@@ -23,6 +23,22 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     return out
 
 
+def _metric_value(value: Any, default: Optional[float] = None) -> Optional[float]:
+    """Extract a float from either raw numeric values or {'value': ...} envelopes."""
+    raw = value
+    if isinstance(raw, dict) and "value" in raw:
+        raw = raw.get("value")
+    try:
+        if raw is None:
+            return default
+        out = float(raw)
+    except Exception:
+        return default
+    if out != out:
+        return default
+    return out
+
+
 def build_live_risk_config(config: Dict[str, Any], *, risk_config_cls: Any) -> Any:
     """Build live risk config from skill config (YAML-owned in live path)."""
     risk_cfg = config.get("config", {}).get("risk", {}) or {}
@@ -201,11 +217,35 @@ async def process_candidates_impl(
             conviction_config=conviction_cfg,
         )
         llm_gate_summary = summary.get("llm_gate") if isinstance(summary, dict) else None
+        payload_llm_gate = payload.get("llm_gate") if isinstance(payload, dict) else None
+        cycle_gate_fallback = False
+        cycle_gate_fallback_reason = None
+        cycle_gate_partial_bypass = False
+        cycle_gate_unreachable_reason = None
         if isinstance(llm_gate_summary, dict):
             gate_status = str(llm_gate_summary.get("status") or "").upper()
             if gate_status in {"INVALID_SCHEMA", "INVALID_COVERAGE"}:
                 summary["llm_gate_fallback_mode"] = "deterministic_policy"
                 summary["llm_gate_fallback_reason"] = llm_gate_summary.get("fallback_reason")
+            cycle_gate_fallback = (
+                str(llm_gate_summary.get("fallback_mode") or "").strip().lower() == "deterministic_policy"
+            )
+            cycle_gate_fallback_reason = str(llm_gate_summary.get("fallback_reason") or "").strip() or None
+            if cycle_gate_fallback:
+                cycle_gate_unreachable_reason = cycle_gate_fallback_reason or "deterministic_policy"
+        if isinstance(payload_llm_gate, dict):
+            cycle_gate_partial_bypass = bool(payload_llm_gate.get("partial_bypass"))
+            subgates = payload_llm_gate.get("subgates") if isinstance(payload_llm_gate.get("subgates"), dict) else {}
+            if isinstance(subgates, dict):
+                for _mode, row in subgates.items():
+                    if not isinstance(row, dict):
+                        continue
+                    mode_err = str(row.get("error") or "").strip()
+                    if mode_err:
+                        cycle_gate_unreachable_reason = mode_err
+                        break
+        if cycle_gate_partial_bypass and not cycle_gate_unreachable_reason:
+            cycle_gate_unreachable_reason = "partial_bypass"
         if llm_gate_terminal:
             return 0, summary
 
@@ -224,6 +264,12 @@ async def process_candidates_impl(
             exec_config=exec_config,
             active_venues=active_venues,
         )
+
+        global_pause_cfg = (config.get("config", {}).get("global_pause", {}) or {})
+        global_pause_enabled = bool(global_pause_cfg.get("enabled", False))
+        global_pause_reason = str(global_pause_cfg.get("reason") or "").strip() or "manual_global_pause"
+        if (not global_block_reason) and global_pause_enabled:
+            global_block_reason = f"global_pause_enabled:{global_pause_reason}"
 
         if global_block_reason:
             print(f"Global block: {global_block_reason}")
@@ -286,6 +332,25 @@ async def process_candidates_impl(
         )
         ct_cooldown_hours = max(0.25, _cfg_float(countertrend_cfg, "cooldown_hours", 8.0))
         ct_manual_block_cfg = bool(countertrend_cfg.get("manual_block", False))
+
+        dead_capital_guard_cfg = (config.get("config", {}).get("dead_capital_reversal_guard", {}) or {})
+        dc_guard_enabled = bool(dead_capital_guard_cfg.get("enabled", True))
+        dc_short_trend_min = _cfg_float(dead_capital_guard_cfg, "short_block_trend_min", 20.0)
+        dc_short_pct24h_min = _cfg_float(dead_capital_guard_cfg, "short_block_pct24h_min", 5.0)
+        dc_short_pct24h_z_min = _cfg_float(dead_capital_guard_cfg, "short_block_pct24h_z_min", 1.5)
+        dc_require_dead_only = bool(dead_capital_guard_cfg.get("require_dead_capital_only", True))
+        dc_max_non_dead_confirms = max(0, int(dead_capital_guard_cfg.get("max_non_dead_confirms", 0) or 0))
+
+        entry_gate_bypass_cfg = (config.get("config", {}).get("entry_gate_bypass_guard", {}) or {})
+        eg_bypass_enabled = bool(entry_gate_bypass_cfg.get("enabled", True))
+        eg_bypass_size_mult_cap = max(0.1, min(1.0, _cfg_float(entry_gate_bypass_cfg, "size_mult_cap", 0.5)))
+        eg_bypass_window_minutes = max(1.0, _cfg_float(entry_gate_bypass_cfg, "window_minutes", 60.0))
+        eg_bypass_max_per_window = max(0, int(entry_gate_bypass_cfg.get("max_entries_per_window", 3) or 3))
+        eg_bypass_block_after_minutes = max(
+            0.0,
+            _cfg_float(entry_gate_bypass_cfg, "hard_block_unreachable_after_minutes", 30.0),
+        )
+        eg_bypass_count_disabled = bool(entry_gate_bypass_cfg.get("count_disabled_as_bypass", False))
 
         def _ct_countertrend(direction_raw: Any, trend_score_raw: Any) -> bool:
             try:
@@ -592,6 +657,147 @@ async def process_candidates_impl(
             ok = bool(n >= ct_expectancy_min_samples and expectancy > 0.0)
             return ok, int(n), float(expectancy)
 
+        def _resolve_gate_execution_type(candidate_obj: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+            gate_reason = str(
+                candidate_obj.get("gate_decision_reason") or candidate_obj.get("llm_pick_reason") or ""
+            ).strip()
+            gate_reason_l = gate_reason.lower()
+            has_gate_decision = candidate_obj.get("gate_decision_id") is not None
+
+            bypass_markers = (
+                "gate_bypassed",
+                "invalid_json",
+                "empty_reply",
+                "coverage_mismatch",
+                "invalid_item_schema",
+                "picks_rejects_not_lists",
+            )
+            has_bypass_marker = any(tok in gate_reason_l for tok in bypass_markers)
+            has_disabled_marker = "gate_disabled" in gate_reason_l
+            if has_bypass_marker or (has_disabled_marker and eg_bypass_count_disabled):
+                return "bypass", (gate_reason or "entry_gate_bypass")
+            if cycle_gate_fallback:
+                reason = str(cycle_gate_fallback_reason or "").strip() or "deterministic_policy"
+                return "bypass", reason
+            if has_gate_decision:
+                return "llm", None
+            return "deterministic", None
+
+        def _eg_ensure_table(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS entry_gate_bypass_state_v1 (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    window_start_ts REAL,
+                    window_count INTEGER DEFAULT 0,
+                    unreachable_since_ts REAL,
+                    last_unreachable_reason TEXT,
+                    updated_at REAL DEFAULT (strftime('%s','now'))
+                )
+                """
+            )
+
+        def _eg_read_state(now_ts: float) -> Dict[str, Any]:
+            out: Dict[str, Any] = {
+                "enabled": bool(eg_bypass_enabled),
+                "window_start_ts": float(now_ts),
+                "window_count": 0,
+                "unreachable_since_ts": None,
+                "last_unreachable_reason": None,
+            }
+            if not eg_bypass_enabled:
+                return out
+            try:
+                with sqlite3.connect(str(deps.db_path), timeout=30.0) as conn:
+                    conn.row_factory = sqlite3.Row
+                    _eg_ensure_table(conn)
+                    row = conn.execute(
+                        """
+                        SELECT window_start_ts, window_count, unreachable_since_ts, last_unreachable_reason
+                        FROM entry_gate_bypass_state_v1
+                        WHERE id = 1
+                        """
+                    ).fetchone()
+                    if row is None:
+                        conn.execute(
+                            """
+                            INSERT INTO entry_gate_bypass_state_v1 (
+                                id, window_start_ts, window_count, unreachable_since_ts, last_unreachable_reason, updated_at
+                            ) VALUES (1, ?, 0, NULL, NULL, ?)
+                            """,
+                            (float(now_ts), float(now_ts)),
+                        )
+                        conn.commit()
+                        row = conn.execute(
+                            """
+                            SELECT window_start_ts, window_count, unreachable_since_ts, last_unreachable_reason
+                            FROM entry_gate_bypass_state_v1
+                            WHERE id = 1
+                            """
+                        ).fetchone()
+                    window_start_ts = (
+                        float(row["window_start_ts"])
+                        if row is not None and row["window_start_ts"] is not None
+                        else float(now_ts)
+                    )
+                    window_count = int(row["window_count"] or 0) if row is not None else 0
+                    unreachable_since_ts = (
+                        float(row["unreachable_since_ts"])
+                        if row is not None and row["unreachable_since_ts"] is not None
+                        else None
+                    )
+                    last_unreachable_reason = (
+                        str(row["last_unreachable_reason"] or "").strip() if row is not None else ""
+                    )
+                    out.update(
+                        {
+                            "window_start_ts": float(window_start_ts),
+                            "window_count": max(0, int(window_count)),
+                            "unreachable_since_ts": unreachable_since_ts,
+                            "last_unreachable_reason": last_unreachable_reason or None,
+                        }
+                    )
+            except Exception as exc:
+                out["error"] = str(exc)
+            return out
+
+        def _eg_write_state(
+            *,
+            now_ts: float,
+            window_start_ts: float,
+            window_count: int,
+            unreachable_since_ts: Optional[float],
+            last_unreachable_reason: Optional[str],
+        ) -> None:
+            if not eg_bypass_enabled:
+                return
+            try:
+                with sqlite3.connect(str(deps.db_path), timeout=30.0) as conn:
+                    _eg_ensure_table(conn)
+                    conn.execute(
+                        """
+                        INSERT INTO entry_gate_bypass_state_v1 (
+                            id, window_start_ts, window_count, unreachable_since_ts, last_unreachable_reason, updated_at
+                        ) VALUES (1, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            window_start_ts = excluded.window_start_ts,
+                            window_count = excluded.window_count,
+                            unreachable_since_ts = excluded.unreachable_since_ts,
+                            last_unreachable_reason = excluded.last_unreachable_reason,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            float(window_start_ts),
+                            max(0, int(window_count)),
+                            float(unreachable_since_ts) if unreachable_since_ts is not None else None,
+                            str(last_unreachable_reason or "").strip() or None,
+                            float(now_ts),
+                        ),
+                    )
+                    conn.commit()
+            except Exception as exc:
+                print(f"Warning: failed to persist entry gate bypass state: {exc}")
+
         fallback_equity = await _resolve_starting_equity(config)
         safety_mgr: Optional[SafetyManager] = None
         if bool(safety_cfg.get("enabled", True)):
@@ -757,7 +963,6 @@ async def process_candidates_impl(
         ct_now_ts = time.time()
         ct_guard_state: Dict[str, Any] = {"enabled": bool(ct_enabled), "active": False}
         if ct_enabled:
-            _ct_write_state(now_ts=ct_now_ts, manual_block=ct_manual_block_cfg)
             ct_guard_state = _ct_read_state(ct_now_ts)
             if not bool(ct_guard_state.get("active")):
                 ct_stats = _ct_recent_stats(ct_now_ts)
@@ -777,7 +982,6 @@ async def process_candidates_impl(
                     _ct_write_state(
                         now_ts=ct_now_ts,
                         cooldown_until=cooldown_until,
-                        manual_block=ct_manual_block_cfg,
                         trigger_reason=trigger_reason,
                     )
                     ct_guard_state = _ct_read_state(ct_now_ts)
@@ -786,10 +990,72 @@ async def process_candidates_impl(
                 ct_guard_state["recent_loss_r"] = round(float(ct_stats.get("loss_r", 0.0)), 4)
             summary["countertrend_guard"] = ct_guard_state
 
+        eg_window_sec = float(eg_bypass_window_minutes * 60.0)
+        eg_window_start_ts = float(ct_now_ts)
+        eg_window_count = 0
+        eg_unreachable_since_ts: Optional[float] = None
+        eg_last_unreachable_reason: Optional[str] = None
+        eg_hard_block_active = False
+        eg_unreachable_duration_min = 0.0
+        if eg_bypass_enabled:
+            eg_state = _eg_read_state(ct_now_ts)
+            eg_window_start_ts = float(eg_state.get("window_start_ts") or ct_now_ts)
+            eg_window_count = max(0, int(eg_state.get("window_count") or 0))
+            eg_unreachable_since_ts = (
+                float(eg_state.get("unreachable_since_ts"))
+                if eg_state.get("unreachable_since_ts") is not None
+                else None
+            )
+            eg_last_unreachable_reason = str(eg_state.get("last_unreachable_reason") or "").strip() or None
+
+            if (ct_now_ts - eg_window_start_ts) >= eg_window_sec:
+                eg_window_start_ts = float(ct_now_ts)
+                eg_window_count = 0
+
+            if cycle_gate_unreachable_reason:
+                if eg_unreachable_since_ts is None:
+                    eg_unreachable_since_ts = float(ct_now_ts)
+                eg_last_unreachable_reason = str(cycle_gate_unreachable_reason).strip() or eg_last_unreachable_reason
+            else:
+                eg_unreachable_since_ts = None
+                eg_last_unreachable_reason = None
+
+            _eg_write_state(
+                now_ts=float(ct_now_ts),
+                window_start_ts=float(eg_window_start_ts),
+                window_count=int(eg_window_count),
+                unreachable_since_ts=eg_unreachable_since_ts,
+                last_unreachable_reason=eg_last_unreachable_reason,
+            )
+
+            if eg_unreachable_since_ts is not None:
+                eg_unreachable_duration_min = max(0.0, (float(ct_now_ts) - float(eg_unreachable_since_ts)) / 60.0)
+            eg_hard_block_active = bool(
+                cycle_gate_unreachable_reason
+                and eg_bypass_block_after_minutes > 0.0
+                and eg_unreachable_duration_min >= float(eg_bypass_block_after_minutes)
+            )
+        summary["entry_gate_bypass_guard"] = {
+            "enabled": bool(eg_bypass_enabled),
+            "window_minutes": float(eg_bypass_window_minutes),
+            "max_entries_per_window": int(eg_bypass_max_per_window),
+            "size_mult_cap": float(eg_bypass_size_mult_cap),
+            "hard_block_unreachable_after_minutes": float(eg_bypass_block_after_minutes),
+            "window_count": int(eg_window_count),
+            "window_start_ts": float(eg_window_start_ts),
+            "unreachable_duration_min": round(float(eg_unreachable_duration_min), 3),
+            "hard_block_active": bool(eg_hard_block_active),
+            "last_unreachable_reason": eg_last_unreachable_reason,
+        }
+
         for candidate in kept:
             symbol = candidate["symbol"]
             direction = candidate["direction"]
             clamp_reason = None
+            gate_execution_type, gate_bypass_reason = _resolve_gate_execution_type(candidate)
+            candidate["entry_gate_execution_type"] = str(gate_execution_type)
+            if gate_bypass_reason:
+                candidate["entry_gate_bypass_reason"] = str(gate_bypass_reason)
 
             # Optional: temporarily pause HIP3 entries while focusing on normal perps.
             if _is_hip3(symbol) and not HIP3_TRADING_ENABLED:
@@ -940,6 +1206,38 @@ async def process_candidates_impl(
                 )
                 continue
 
+            if gate_execution_type == "bypass" and eg_bypass_enabled:
+                if eg_hard_block_active:
+                    _block_candidate(
+                        db=db,
+                        summary=summary,
+                        seq=seq,
+                        candidate=candidate,
+                        reason=(
+                            f"entry_gate_bypass_hard_block "
+                            f"(unreachable_min={eg_unreachable_duration_min:.1f} "
+                            f"threshold_min={eg_bypass_block_after_minutes:.1f})"
+                        ),
+                        venues=candidate_venues,
+                        block_count=len(candidate_venues),
+                    )
+                    continue
+                if eg_bypass_max_per_window > 0 and eg_window_count >= eg_bypass_max_per_window:
+                    _block_candidate(
+                        db=db,
+                        summary=summary,
+                        seq=seq,
+                        candidate=candidate,
+                        reason=(
+                            f"entry_gate_bypass_window_cap "
+                            f"(count={eg_window_count}/{eg_bypass_max_per_window} "
+                            f"window_min={eg_bypass_window_minutes:.0f})"
+                        ),
+                        venues=candidate_venues,
+                        block_count=len(candidate_venues),
+                    )
+                    continue
+
             # Soft net-exposure warning gate (per venue): when a venue is already skewed,
             # same-direction adds require strong signal for that venue only.
             d = str(direction or "").upper()
@@ -1003,9 +1301,48 @@ async def process_candidates_impl(
                 ts = km.get("trend_state") or {}
                 trend_score = float(ts.get("trend_score")) if ts.get("trend_score") is not None else None
                 regime = str(ts.get("regime") or "").upper()
+                pct_24h = _metric_value(km.get("pct_24h"), 0.0) or 0.0
+                pct_24h_z = _metric_value(candidate.get("pct_24h_zscore"), None)
+                if pct_24h_z is None:
+                    pct_24h_z = _metric_value((candidate.get("context_snapshot") or {}).get("pct_24h_zscore"), 0.0)
+                pct_24h_z = pct_24h_z or 0.0
 
                 sigs = [str(s).upper().strip() for s in (candidate.get("signals") or []) if isinstance(s, str) and str(s).strip()]
                 dead_only = bool(sigs) and all(s.startswith("DEAD_CAPITAL") for s in sigs)
+                if not dead_only:
+                    dead_only = _ct_dead_only(candidate)
+                has_dead_capital = dead_only or any(s.startswith("DEAD_CAPITAL") for s in sigs)
+                countertrend_non_dead_confirms = _ct_non_dead_confirms(candidate, direction)
+
+                # DEAD_CAPITAL blind-spot guard:
+                # avoid SHORT fading broad bullish momentum unless additional non-dead confirmations exist.
+                if (
+                    dc_guard_enabled
+                    and str(direction or "").upper() == "SHORT"
+                    and has_dead_capital
+                    and (dead_only if dc_require_dead_only else True)
+                    and countertrend_non_dead_confirms <= dc_max_non_dead_confirms
+                    and trend_score is not None
+                    and float(trend_score) >= float(dc_short_trend_min)
+                    and float(pct_24h) >= float(dc_short_pct24h_min)
+                    and float(pct_24h_z) >= float(dc_short_pct24h_z_min)
+                ):
+                    _block_candidate(
+                        db=db,
+                        summary=summary,
+                        seq=seq,
+                        candidate=candidate,
+                        reason=(
+                            f"dead_capital_short_reversal_guard "
+                            f"(trend_score={float(trend_score):.1f} "
+                            f"pct_24h={float(pct_24h):.2f}% "
+                            f"pct_24h_z={float(pct_24h_z):.2f} "
+                            f"non_dead_confirms={countertrend_non_dead_confirms})"
+                        ),
+                        venues=candidate_venues,
+                        block_count=len(candidate_venues),
+                    )
+                    continue
 
                 countertrend_40 = _ct_countertrend(direction, trend_score)
                 if countertrend_40 and dead_only:
@@ -1039,7 +1376,8 @@ async def process_candidates_impl(
                             block_count=len(candidate_venues),
                         )
                         continue
-                    countertrend_non_dead_confirms = _ct_non_dead_confirms(candidate, direction)
+                    if countertrend_non_dead_confirms <= 0:
+                        countertrend_non_dead_confirms = _ct_non_dead_confirms(candidate, direction)
                     if countertrend_non_dead_confirms < ct_min_non_dead_confirmations:
                         _block_candidate(
                             db=db,
@@ -1386,6 +1724,7 @@ async def process_candidates_impl(
 
             # Opt2 (LLM) size multiple: scale risk_pct (then clamp). Range [0.5, 2.0].
             llm_mult = None
+            bypass_size_mult_applied = None
             try:
                 llm_mult = float(candidate.get("llm_size_mult") or (candidate.get("execution") or {}).get("size_mult") or 0.0)
             except Exception:
@@ -1401,6 +1740,18 @@ async def process_candidates_impl(
                     try:
                         candidate["risk"] = dict(candidate.get("risk") or {})
                         candidate["risk"]["llm_size_mult"] = round(llm_mult, 4)
+                    except Exception:
+                        pass
+
+            if gate_execution_type == "bypass" and eg_bypass_enabled:
+                bypass_size_mult_applied = float(eg_bypass_size_mult_cap)
+                if bypass_size_mult_applied < 1.0:
+                    risk_pct_candidate_lighter, _ = clamp_risk_pct(risk_pct_candidate_lighter * bypass_size_mult_applied)
+                    risk_pct_candidate_hl, _ = clamp_risk_pct(risk_pct_candidate_hl * bypass_size_mult_applied)
+                    effective_size_mult *= float(bypass_size_mult_applied)
+                    try:
+                        candidate["risk"] = dict(candidate.get("risk") or {})
+                        candidate["risk"]["entry_gate_bypass_size_mult"] = round(float(bypass_size_mult_applied), 4)
                     except Exception:
                         pass
 
@@ -1464,6 +1815,11 @@ async def process_candidates_impl(
                 risk_meta["size_multiplier_effective"] = round(float(effective_size_mult), 4)
                 if llm_mult is not None and llm_mult > 0:
                     risk_meta["llm_size_mult"] = round(float(llm_mult), 4)
+                if bypass_size_mult_applied is not None:
+                    risk_meta["entry_gate_bypass_size_mult"] = round(float(bypass_size_mult_applied), 4)
+                risk_meta["entry_gate_execution_type"] = str(gate_execution_type)
+                if gate_bypass_reason:
+                    risk_meta["entry_gate_bypass_reason"] = str(gate_bypass_reason)
                 risk_meta["countertrend_40"] = bool(countertrend_40)
                 if countertrend_40:
                     if trend_score is not None:
@@ -1729,6 +2085,18 @@ async def process_candidates_impl(
             if not successful_venues:
                 continue
             summary["counts"]["proposed"] += 1
+            if gate_execution_type == "bypass" and eg_bypass_enabled:
+                eg_window_count = max(0, int(eg_window_count)) + 1
+                _eg_write_state(
+                    now_ts=float(time.time()),
+                    window_start_ts=float(eg_window_start_ts),
+                    window_count=int(eg_window_count),
+                    unreachable_since_ts=eg_unreachable_since_ts,
+                    last_unreachable_reason=eg_last_unreachable_reason,
+                )
+                eg_summary = summary.get("entry_gate_bypass_guard")
+                if isinstance(eg_summary, dict):
+                    eg_summary["window_count"] = int(eg_window_count)
             accepted_total = sum(float(size_overrides.get(v) or 0.0) for v in successful_venues)
             projected_total_exposure += accepted_total
             dir_sign = 1.0 if str(direction or "").upper() == "LONG" else -1.0

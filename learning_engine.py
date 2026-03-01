@@ -536,11 +536,68 @@ class LearningEngine(EnhancedLearningEngine):
         except Exception:
             return False
 
+    @staticmethod
+    def _parse_context_snapshot_obj(raw: Any) -> Dict[str, Any]:
+        if isinstance(raw, dict):
+            return dict(raw)
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                return {}
+        return {}
+
+    @staticmethod
+    def _entry_gate_execution_type_from_context(ctx: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(ctx, dict):
+            return None
+
+        risk_obj = ctx.get("risk")
+        risk_obj = dict(risk_obj) if isinstance(risk_obj, dict) else {}
+        gate_obj = ctx.get("entry_gate")
+        gate_obj = dict(gate_obj) if isinstance(gate_obj, dict) else {}
+
+        candidates = [
+            ctx.get("entry_gate_execution_type"),
+            ctx.get("gate_execution_type"),
+            risk_obj.get("entry_gate_execution_type"),
+            risk_obj.get("gate_execution_type"),
+            gate_obj.get("gate_type"),
+        ]
+        for value in candidates:
+            txt = str(value or "").strip().lower()
+            if txt in {"llm", "bypass", "deterministic"}:
+                return txt
+
+        reason_candidates = [
+            ctx.get("entry_gate_bypass_reason"),
+            risk_obj.get("entry_gate_bypass_reason"),
+            gate_obj.get("bypass_reason"),
+            gate_obj.get("gate_decision_reason"),
+        ]
+        for reason in reason_candidates:
+            txt = str(reason or "").strip().lower()
+            if not txt:
+                continue
+            if "bypass" in txt or "gate_bypassed" in txt:
+                return "bypass"
+        return None
+
+    def _is_bypass_trade(self, trade: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(trade, dict):
+            return False
+        ctx = self._parse_context_snapshot_obj(trade.get("context_snapshot"))
+        gate_type = self._entry_gate_execution_type_from_context(ctx)
+        return str(gate_type or "").strip().lower() == "bypass"
+
     def analyze_trade(
         self,
         trade_id: int,
         persist: bool = True,
         trade: Optional[Dict] = None,
+        apply_adjustments: bool = True,
     ) -> Optional[Mistake]:
         """
         Analyze a closed trade to identify mistakes.
@@ -608,7 +665,8 @@ class LearningEngine(EnhancedLearningEngine):
             self.on_mistake(mistake)
 
         # Update adjustments
-        self._update_adjustments_from_mistake(mistake)
+        if apply_adjustments:
+            self._update_adjustments_from_mistake(mistake)
 
         # Save
         if persist:
@@ -1053,23 +1111,30 @@ class LearningEngine(EnhancedLearningEngine):
         # Fetch trade to check win/loss
         trade = self._get_trade_from_db(trade_id)
         state_changed = False
+        bypass_trade = self._is_bypass_trade(trade)
         if trade:
             pnl = trade.get('realized_pnl', 0) or 0
             direction = trade.get('direction', '')
             symbol = trade.get('symbol', '')
+            if bypass_trade:
+                self.log.info(f"Bypass trade detected: trade_id={trade_id} symbol={symbol} (skipping adjustment updates)")
             
             if self._is_win_pnl(pnl):
-                # Winning trade - apply reward
-                entry_signals = self._parse_signals_snapshot(trade.get('signals_snapshot'))
-                self._update_adjustments_from_win(symbol, entry_signals, direction, persist=False)
-                state_changed = True
-                self.log.info(f"Win reward applied: {symbol} ${pnl:.2f}")
+                if bypass_trade:
+                    self.log.info(f"Win reward skipped for bypass trade: {symbol} ${pnl:.2f}")
+                else:
+                    # Winning trade - apply reward
+                    entry_signals = self._parse_signals_snapshot(trade.get('signals_snapshot'))
+                    self._update_adjustments_from_win(symbol, entry_signals, direction, persist=False)
+                    state_changed = True
+                    self.log.info(f"Win reward applied: {symbol} ${pnl:.2f}")
             elif self._is_loss_pnl(pnl):
                 # Losing trade - analyze_trade handles penalties
                 mistake = self.analyze_trade(
                     trade_id,
                     persist=False,
                     trade=trade,
+                    apply_adjustments=not bypass_trade,
                 )  # Classifies mistakes, updates adjustments
                 state_changed = bool(mistake) or state_changed
             else:
@@ -1090,13 +1155,17 @@ class LearningEngine(EnhancedLearningEngine):
                     except Exception as e:
                         self.log.warning(f"Failed to update context stats: {e}")
 
-        pattern_key = self.update_pattern_stats(
-            trade_id,
-            persist=False,
-            trade=trade,
-        )  # Updates patterns.json, sets avoid_until
-        if pattern_key:
-            state_changed = True
+        pattern_key = None
+        if bypass_trade:
+            self.log.info(f"Pattern update skipped for bypass trade: trade_id={trade_id}")
+        else:
+            pattern_key = self.update_pattern_stats(
+                trade_id,
+                persist=False,
+                trade=trade,
+            )  # Updates patterns.json, sets avoid_until
+            if pattern_key:
+                state_changed = True
 
         if state_changed:
             self.save_state()

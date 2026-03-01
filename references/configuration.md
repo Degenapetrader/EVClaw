@@ -83,6 +83,59 @@ config:
     hard_band_pct: 30
 ```
 
+### Global Pause
+
+Use this as a true kill switch for new entries.
+
+```yaml
+config:
+  global_pause:
+    enabled: false
+    reason: manual_pause
+```
+
+When `enabled: true`, EVClaw blocks all new candidates regardless of direction, trend classification, or signal type.
+
+### Countertrend Guard Notes
+
+- `countertrend_guard.manual_block` is no longer rewritten from `skill.yaml` every cycle.
+- Runtime DB state is treated as source of truth after initialization.
+
+### DEAD_CAPITAL Reversal Guard
+
+Protects against SHORTing broad bullish continuation from DEAD_CAPITAL-only pressure.
+
+```yaml
+config:
+  dead_capital_reversal_guard:
+    enabled: true
+    short_block_trend_min: 20
+    short_block_pct24h_min: 5.0
+    short_block_pct24h_z_min: 1.5
+    require_dead_capital_only: true
+    max_non_dead_confirms: 0
+```
+
+### Entry Gate Bypass Guard
+
+Controls risk when LLM gate output is bypassed and deterministic fallback is used.
+
+```yaml
+config:
+  entry_gate_bypass_guard:
+    enabled: true
+    size_mult_cap: 0.5
+    window_minutes: 60
+    max_entries_per_window: 3
+    hard_block_unreachable_after_minutes: 30
+    count_disabled_as_bypass: false
+```
+
+Behavior:
+- Caps bypass sizing multiplier.
+- Limits number of bypass entries per rolling window.
+- Can hard-block new bypass entries after prolonged gate unreachability.
+
 ### Learning Settings
 
 ```yaml
@@ -98,6 +151,9 @@ config:
     symbol_specific_learning: true
     decay_halflife_days: 30
 ```
+
+Bypass-aware learning:
+- Trades tagged as `entry_gate_execution_type: bypass` are excluded from adaptive signal/symbol updates and pattern updates.
 
 ### Exit Decider Settings
 
@@ -124,6 +180,13 @@ exchanges:
     type: hip3_stocks
     enabled: true
 ```
+
+## External Endpoint Requirements (HIP3)
+
+- Primary HIP3 stream: `https://tracker.evplus.ai:8443/sse/tracker?key=<wallet>`
+- HIP3 REST state: `https://tracker.evplus.ai/api/hip3/predator-state?key=<wallet>`
+- HIP3 symbols REST: `https://tracker.evplus.ai/api/hip3-symbols?key=<wallet>`
+- `?key=<wallet>` is required for REST calls; missing key can cause HIP3 context gaps.
 
 ## Symbol Routing Overrides
 

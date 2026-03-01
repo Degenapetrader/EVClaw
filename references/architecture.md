@@ -87,9 +87,34 @@ Cycle Trigger → Cycle File + Context → System Event → Main Agent (gpt-5.2)
 1. **Signal Ingestion**: SSE consumer receives signals from tracker
 2. **Context Building**: Signals aggregated into cycle context
 3. **Decision Making**: Trading brain scores opportunities
-4. **Risk Assessment**: Risk manager validates and sizes positions
-5. **Execution**: Executor places orders on appropriate venue
-6. **Learning**: Learning engine updates weights from outcomes
+4. **Entry Gating**: LLM gate approves/rejects, or deterministic fallback applies
+5. **Risk Assessment**: Risk manager validates and sizes positions
+6. **Execution**: Executor places orders on appropriate venue
+7. **Learning**: Learning engine updates weights from outcomes
+
+## Entry Gate Runtime Controls
+
+1. `global_pause.enabled=true` hard-blocks all new entries (universal pause switch).
+2. `entry_gate_bypass_guard` applies when candidates are tagged as gate bypass:
+   - size multiplier cap (default `0.5x`)
+   - rolling window cap (`max_entries_per_window`)
+   - optional hard block after prolonged gate unreachability
+3. Each proposal/trade carries gate attribution fields:
+   - `entry_gate_execution_type` (`llm` | `bypass` | `deterministic`)
+   - `entry_gate_bypass_reason` (when relevant)
+
+## Learning Attribution Guard
+
+- Learning skips adaptive signal/symbol updates and pattern updates for trades tagged `entry_gate_execution_type=bypass`.
+- This prevents tunnel/outage fallback behavior from corrupting signal coefficients.
+
+## HIP3 Runtime Path (Critical)
+
+1. **Primary feed**: `sse_consumer.py` connects to `https://tracker.evplus.ai:8443/sse/tracker?key=<wallet>` and merges `hip3-data` into `symbol["hip3_predator"]`.
+2. **Trigger path**: `cycle_trigger.py` consumes HIP3 snapshots from SSE and builds candidates from `hip3_predator`.
+3. **Signal logic**: `hip3_main.py` computes `hip3_main` with OR semantics (FLOW pass or OFM pass), while direction conflicts are blocked.
+4. **Context enrichment**: `context_builder_v2.py` uses SSE payload first; if missing, it optionally fetches `EVCLAW_TRACKER_HIP3_PREDATOR_URL`.
+5. **Failure behavior**: REST auth/routing issues (`401/403`) are non-fatal but can reduce enrichment. If FLOW/OFM gates fail, HIP3 candidates are suppressed for that symbol.
 
 ## Memory Architecture
 
