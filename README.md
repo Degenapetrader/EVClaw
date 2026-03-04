@@ -164,6 +164,8 @@ Common network defaults:
 
 Tracker data contract (critical):
 - Primary real-time feed (drives trading/interrupts): `https://tracker.evplus.ai:8443/sse/tracker?key=$HYPERLIQUID_ADDRESS`
+- EVClaw default also appends `&profile=evclaw-lite` on the same endpoint to reduce payload size.
+- Fallback: set `EVCLAW_SSE_PROFILE=full` to disable lite profile instantly.
 - HIP3 REST (context/enrichment endpoints): `https://tracker.evplus.ai/api/hip3/predator-state?key=$HYPERLIQUID_ADDRESS`
 - HIP3 symbols REST: `https://tracker.evplus.ai/api/hip3-symbols?key=$HYPERLIQUID_ADDRESS`
 - If you override `EVCLAW_TRACKER_HIP3_PREDATOR_URL` or `EVCLAW_TRACKER_HIP3_SYMBOLS_URL`, include `?key=<wallet>` in the URL.

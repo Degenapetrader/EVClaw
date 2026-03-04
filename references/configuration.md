@@ -184,6 +184,8 @@ exchanges:
 ## External Endpoint Requirements (HIP3)
 
 - Primary HIP3 stream: `https://tracker.evplus.ai:8443/sse/tracker?key=<wallet>`
+- EVClaw default stream profile: `https://tracker.evplus.ai:8443/sse/tracker?key=<wallet>&profile=evclaw-lite`
+- Fallback profile: set `EVCLAW_SSE_PROFILE=full`
 - HIP3 REST state: `https://tracker.evplus.ai/api/hip3/predator-state?key=<wallet>`
 - HIP3 symbols REST: `https://tracker.evplus.ai/api/hip3-symbols?key=<wallet>`
 - `?key=<wallet>` is required for REST calls; missing key can cause HIP3 context gaps.

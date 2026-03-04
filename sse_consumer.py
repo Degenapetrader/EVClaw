@@ -18,6 +18,7 @@ import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Optional, Union
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import aiohttp
 
@@ -33,6 +34,7 @@ SSE_ENDPOINT = env_str(
     "EVCLAW_SSE_ENDPOINT",
     "/sse/tracker",
 )
+SSE_PROFILE = env_str("EVCLAW_SSE_PROFILE", "evclaw-lite")
 SSE_INSECURE_SSL = env_bool("EVCLAW_SSE_INSECURE_SSL", False)
 
 # Reconnection settings
@@ -85,6 +87,7 @@ class TrackerSSEClient:
         host: str = SSE_HOST,
         port: int = SSE_PORT,
         endpoint: str = SSE_ENDPOINT,
+        sse_profile: str = SSE_PROFILE,
     ):
         """
         Initialize SSE client.
@@ -96,6 +99,7 @@ class TrackerSSEClient:
             host: SSE server host
             port: SSE server port
             endpoint: SSE endpoint path
+            sse_profile: SSE profile query value (`full` disables profile param)
         """
         self.wallet_address = wallet_address
         self.on_data = on_data
@@ -103,6 +107,7 @@ class TrackerSSEClient:
         self.host = host
         self.port = port
         self.endpoint = endpoint
+        self.sse_profile = str(sse_profile or "").strip().lower()
 
         self.log = get_logger("sse_consumer")
 
@@ -125,8 +130,15 @@ class TrackerSSEClient:
 
     @property
     def url(self) -> str:
-        """Build SSE URL with auth key."""
-        return f"https://{self.host}:{self.port}{self.endpoint}?key={self.wallet_address}"
+        """Build SSE URL with auth key and optional profile."""
+        base = f"https://{self.host}:{self.port}{self.endpoint}"
+        parts = urlsplit(base)
+        query = [(k, v) for (k, v) in parse_qsl(parts.query, keep_blank_values=True) if k not in ("key", "profile")]
+        query.append(("key", self.wallet_address))
+        if self.sse_profile and self.sse_profile != "full":
+            query.append(("profile", self.sse_profile))
+        final_query = urlencode(query)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, final_query, parts.fragment))
 
 
 

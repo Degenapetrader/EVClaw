@@ -76,3 +76,31 @@ def test_tracker_on_signal_async_callback_supported() -> None:
 
     assert len(called) == 1
     assert called[0][0] == "BTC"
+
+
+def test_sse_url_appends_profile_when_not_full() -> None:
+    client = TrackerSSEClient(
+        wallet_address="0x0000000000000000000000000000000000000001",
+        host="tracker.evplus.ai",
+        port=8443,
+        endpoint="/sse/tracker",
+        sse_profile="evclaw-lite",
+    )
+    assert client.url == (
+        "https://tracker.evplus.ai:8443/sse/tracker"
+        "?key=0x0000000000000000000000000000000000000001&profile=evclaw-lite"
+    )
+
+
+def test_sse_url_omits_profile_when_full() -> None:
+    client = TrackerSSEClient(
+        wallet_address="0x0000000000000000000000000000000000000001",
+        host="tracker.evplus.ai",
+        port=8443,
+        endpoint="/sse/tracker?foo=bar",
+        sse_profile="full",
+    )
+    assert client.url == (
+        "https://tracker.evplus.ai:8443/sse/tracker"
+        "?foo=bar&key=0x0000000000000000000000000000000000000001"
+    )
