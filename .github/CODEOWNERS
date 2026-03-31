@@ -1,0 +1,4 @@
+# Dependency and automation changes require explicit maintainer review.
+/.github/workflows/ @Degenapetrader
+/requirements.txt @Degenapetrader
+/requirements-lighter.txt @Degenapetrader
