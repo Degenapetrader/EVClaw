@@ -1,4 +1,5 @@
 # EVClaw Python Requirements
+# socket test: harmless comment to trigger PR security checks
 
 # Core
 aiohttp>=3.9.0
