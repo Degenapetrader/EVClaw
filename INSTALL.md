@@ -142,8 +142,18 @@ python3 "$EVCLAW_ROOT/scripts/cleanup_runtime_artifacts.py" --apply --npm-cache 
 
 ## Required EVPlus Endpoints
 EVClaw is network-first and expects EVPlus services by default:
-- Tracker SSE/API: `tracker.evplus.ai` (port `8443`, endpoint `/sse/tracker`)
+Tracker SSE/API:
+- Primary SSE stream: `https://tracker.evplus.ai:8443/sse/tracker?key=$HYPERLIQUID_ADDRESS`
+- EVClaw default appends `&profile=evclaw-lite` on the same endpoint to reduce bandwidth.
+- Set `EVCLAW_SSE_PROFILE=full` for immediate fallback to full payload.
+- HIP3 REST state: `https://tracker.evplus.ai/api/hip3/predator-state?key=$HYPERLIQUID_ADDRESS`
+- HIP3 symbols REST: `https://tracker.evplus.ai/api/hip3-symbols?key=$HYPERLIQUID_ADDRESS`
 - Private node: `https://node2.evplus.ai/evclaw/info`
+
+Endpoint contract:
+- SSE `hip3-data` is the primary HIP3 signal stream used by cycle triggers.
+- HIP3 REST endpoints are used for context/symbol enrichment and must be called with `?key=<wallet>`.
+- If overriding `EVCLAW_TRACKER_HIP3_PREDATOR_URL`/`EVCLAW_TRACKER_HIP3_SYMBOLS_URL`, include `?key=...` explicitly.
 
 Node2 auth test (RIGHT way):
 ```bash
@@ -157,6 +167,7 @@ Wrong patterns (do not use):
 - `POST /evclaw/status`
 - `POST /evclaw/info` without `?key=...`
 - putting wallet address in JSON body instead of query `key`
+- calling HIP3 REST endpoints without `?key=...`
 
 ## Run Without tmux (Optional)
 You can run each service in its own terminal:
@@ -203,7 +214,8 @@ Runtime retention note:
   - Remove legacy `HYPERLIQUID_API` if present.
 - Tracker unreachable:
   - Check `EVCLAW_SSE_HOST`, `EVCLAW_SSE_PORT`, `EVCLAW_SSE_ENDPOINT`.
-  - Verify `curl -ks https://tracker.evplus.ai/health`.
+  - Verify `curl -ks https://tracker.evplus.ai:8443/health`.
+  - Verify `curl -ks "https://tracker.evplus.ai/api/hip3/predator-state?key=$HYPERLIQUID_ADDRESS"`.
   - If tracker/node2 auth returns 401/403, approve builder fee at `https://atsetup.evplus.ai/`.
 - Node endpoint issues:
   - Check `HYPERLIQUID_PRIVATE_NODE` (default `https://node2.evplus.ai/evclaw/info`).

@@ -277,6 +277,26 @@ remind_hip3_and_retention() {
   echo "Retention is fixed to keep last 50 files per class (safety floor: 20)."
 }
 
+prepare_evclaw_rust_component() {
+  if [[ ! -d "$DIR/evclaw_rust" ]]; then
+    return 0
+  fi
+
+  mkdir -p \
+    "$DIR/evclaw_rust/logs" \
+    "$DIR/evclaw_rust/state-live" \
+    "$DIR/evclaw_rust/state-live-backups"
+
+  if [[ ! -f "$DIR/evclaw_rust/.env" && -f "$DIR/evclaw_rust/.env.example" ]]; then
+    cp "$DIR/evclaw_rust/.env.example" "$DIR/evclaw_rust/.env"
+    echo "Created evclaw_rust/.env from template."
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "Warning: cargo not found; evclaw_rust wrapper scripts will exist but builds will fail until Rust is installed."
+  fi
+}
+
 ensure_openclaw_cli() {
   if ! command -v openclaw >/dev/null 2>&1; then
     echo "openclaw is required but was not found in PATH." >&2
@@ -383,6 +403,7 @@ warn_if_missing_runtime_env
 remind_builder_approval
 remind_learning_seed_option
 remind_hip3_and_retention
+prepare_evclaw_rust_component
 
 mkdir -p state memory signals docs
 
@@ -412,3 +433,10 @@ if [[ "${EVCLAW_INSTALL_OPENCLAW_CRONS:-1}" == "1" || "${EVCLAW_INSTALL_OPENCLAW
 fi
 
 echo "Run ./start.sh to start all services"
+if [[ -d "$DIR/evclaw_rust" ]]; then
+  echo "Rust perp bot wrappers:"
+  echo "  ./scripts/evclaw_rust_status.sh"
+  echo "  ./scripts/evclaw_rust_start.sh"
+  echo "  ./scripts/evclaw_rust_restart.sh"
+  echo "  ./scripts/evclaw_rust_logs.sh"
+fi

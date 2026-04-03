@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Iterable, Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from dotenv import load_dotenv
 
@@ -68,6 +69,31 @@ def _join_tracker_api_url(base_url: Optional[str], path: str) -> str:
     return f"{base}{path}"
 
 
+def _with_wallet_key(url: Optional[str], wallet: Optional[str]) -> str:
+    raw_url = str(url or "").strip()
+    wallet_key = str(wallet or "").strip()
+    if not raw_url or not wallet_key:
+        return raw_url
+    try:
+        parsed = urlparse(raw_url)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if "key" not in query:
+            query["key"] = wallet_key
+        return urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                urlencode(query),
+                parsed.fragment,
+            )
+        )
+    except Exception:
+        # Fall back to raw URL if parsing fails; explicit env override can always replace this.
+        return raw_url
+
+
 def env_bool(name: str, default: bool) -> bool:
     if not env_present(name):
         return default
@@ -104,13 +130,20 @@ EVCLAW_MEMORY_DIR = env_str("EVCLAW_MEMORY_DIR", str(Path(EVCLAW_ROOT) / "memory
 EVCLAW_DB_PATH = env_str("EVCLAW_DB_PATH", str(Path(EVCLAW_ROOT) / "ai_trader.db"))
 EVCLAW_SIGNALS_DIR = env_str("EVCLAW_SIGNALS_DIR", str(Path(EVCLAW_ROOT) / "signals"))
 EVCLAW_TRACKER_BASE_URL = env_str("EVCLAW_TRACKER_BASE_URL", "https://tracker.evplus.ai")
+EVCLAW_WALLET_KEY = env_str("HYPERLIQUID_ADDRESS", env_str("EVCLAW_WALLET_ADDRESS", ""))
 EVCLAW_TRACKER_HIP3_PREDATOR_URL = env_str(
     "EVCLAW_TRACKER_HIP3_PREDATOR_URL",
-    _join_tracker_api_url(EVCLAW_TRACKER_BASE_URL, "/api/hip3/predator-state"),
+    _with_wallet_key(
+        _join_tracker_api_url(EVCLAW_TRACKER_BASE_URL, "/api/hip3/predator-state"),
+        EVCLAW_WALLET_KEY,
+    ),
 )
 EVCLAW_TRACKER_HIP3_SYMBOLS_URL = env_str(
     "EVCLAW_TRACKER_HIP3_SYMBOLS_URL",
-    _join_tracker_api_url(EVCLAW_TRACKER_BASE_URL, "/api/hip3-symbols"),
+    _with_wallet_key(
+        _join_tracker_api_url(EVCLAW_TRACKER_BASE_URL, "/api/hip3-symbols"),
+        EVCLAW_WALLET_KEY,
+    ),
 )
 EVCLAW_TRACKER_SYMBOL_URL_TEMPLATE = env_str(
     "EVCLAW_TRACKER_SYMBOL_URL_TEMPLATE",

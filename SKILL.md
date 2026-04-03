@@ -1,6 +1,6 @@
 ---
 name: EVClaw
-description: Trading skill for executing live agent trades on Lighter (crypto perps) and Hyperliquid (HIP3 stocks). Use when user asks about trading, positions, signals, executing trades, live agent mode, cycle files, or managing EVClaw operations. Supports (1) Running live agent cycles via /live-agent, (2) Executing manual trades via /trade and /execute, (3) Viewing signals/positions, (4) Managing trading configuration, (5) Understanding signal types and decision logic, (6) Agent-driven incident response and triage.
+description: Trading skill for executing live agent trades on Lighter (crypto perps) and Hyperliquid (HIP3 stocks), plus operating the embedded Rust Hyperliquid perp bot under evclaw_rust/. Use when user asks about trading, positions, signals, executing trades, live agent mode, cycle files, Rust bot runtime management, or managing EVClaw operations. Supports (1) Running live agent cycles via /live-agent, (2) Executing manual trades via /trade and /execute, (3) Viewing signals/positions, (4) Managing trading configuration, (5) Understanding signal types and decision logic, (6) Agent-driven incident response and triage, (7) Operating the Rust perp bot.
 ---
 
 # EVClaw Trading Skill
@@ -29,6 +29,7 @@ Cycle Trigger → Cycle File + Context → System Event → Main Agent (gpt-5.2)
 ## Key Features
 
 - Live agent trading (context → main agent → execute)
+- Embedded Rust Hyperliquid perp bot at `evclaw_rust/`, managed as a separate runtime
 - Snapshot-driven cycle handling + context builder
 - Per-venue execution (no requirement that a symbol exists on both exchanges)
 - Dynamic sizing + exposure limits via DynamicRiskManager
@@ -103,6 +104,19 @@ View and manage open positions.
 ```bash
 python3 ${EVCLAW_ROOT}/cli.py positions [--all] [--close <symbol>] [--export]
 ```
+
+### Rust perp bot runtime ops
+
+Use these exact commands for the embedded Rust bot:
+
+```bash
+${EVCLAW_ROOT}/scripts/evclaw_rust_status.sh
+${EVCLAW_ROOT}/scripts/evclaw_rust_start.sh
+${EVCLAW_ROOT}/scripts/evclaw_rust_restart.sh
+${EVCLAW_ROOT}/scripts/evclaw_rust_logs.sh
+```
+
+The Rust bot is operationally separate from the Python live-agent pipeline. Use it for Hyperliquid perp runtime management, not for `/trade` or `/execute` plan generation.
 
 ## Python Scripts
 
@@ -260,6 +274,12 @@ Persistent state is stored in `memory/`:
   - `EVCLAW_TRACKER_SYMBOL_URL_TEMPLATE`
 - EVClaw OSS is network-only: all tracker data is fetched from `tracker.evplus.ai`
 - SSE tracker running on tracker.evplus.ai:8443
+- HIP3 endpoint contract (must follow):
+- SSE primary feed: `https://tracker.evplus.ai:8443/sse/tracker?key=<wallet>`
+- HIP3 REST: `https://tracker.evplus.ai/api/hip3/predator-state?key=<wallet>`
+- HIP3 symbols REST: `https://tracker.evplus.ai/api/hip3-symbols?key=<wallet>`
+- REST calls without `?key=` are invalid and can cause missing HIP3 context.
+- HIP3 signal semantics: OR-driver (`FLOW` or `OFM` can drive), but direction conflicts are blocked.
 
 ## Sub-Skills
 

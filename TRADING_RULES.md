@@ -54,12 +54,13 @@ Signals → ContextBuilderV2 → TradingBrain (me) → DynamicRiskManager → Ex
 **Deprecated / excluded from scoring:** `liq_pnl` (kept for monitoring only).
 
 ### HIP3 signals (xyz:* only)
-- `hip3_main` (primary for HIP3): FLOW divergence gate (HL vs Massive) + OFM alignment confirmation
+- `hip3_main` (primary for HIP3): OR-driver between FLOW divergence and OFM confidence; direction conflicts are blocked
 
 **Tracking + learning (important):**
 - These are stored into `ai_trader.db` under `trades.signals_snapshot` / `trades.context_snapshot`
 - Learning engine updates pattern/signal adjustments for `hip3_main` just like other signals
 - HIP3 Predator signals stream over SSE as `hip3-data` and are merged into context in real time
+- HIP3 REST endpoints (`/api/hip3/predator-state`, `/api/hip3-symbols`) are enrichment-only and require `?key=<wallet>`
 
 ### Current weights (used by OpportunityScorer)
 - Primary:

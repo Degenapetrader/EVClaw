@@ -15,6 +15,8 @@ Purpose: compact runtime contract for AI agents/operators working in this repo.
 - `hourly_ops.py`: deterministic safety/reconcile/health runner.
 - `run_fill_reconciler.py`: fill tracking + reconciliation.
 - `live_monitor.py`: equity snapshots used by SR/equity safety checks.
+- `evclaw_rust/`: standalone Rust Hyperliquid perp bot (combined DEAD_CAP + WHALE strategy).
+- `scripts/evclaw_rust_start.sh` / `scripts/evclaw_rust_restart.sh` / `scripts/evclaw_rust_status.sh` / `scripts/evclaw_rust_logs.sh`: canonical operator surface for the Rust bot.
 
 ## Cron install requirement (critical)
 - EVClaw deterministic safety/reporting depends on OpenClaw cron jobs being installed and active.
@@ -36,6 +38,7 @@ Runtime artifacts:
 - DB: `${EVCLAW_DB_PATH:-./ai_trader.db}`
 - Ops JSON: `${EVCLAW_RUNTIME_DIR:-./state}/hourly_ops_report.json`
 - Ops summary: `${EVCLAW_RUNTIME_DIR:-./state}/hourly_ops_summary.txt`
+- Rust perp bot env/state/journal/logs live under `./evclaw_rust/` and are managed separately from the Python runtime.
 - Cycle/context/candidate artifacts are auto-pruned by `cycle_trigger.py` every cycle.
 - Retention is fixed in code to keep last `50` files per class (safety floor: `20`).
 
@@ -44,6 +47,8 @@ Runtime artifacts:
 - Exit: producers (plan-only) -> exit decider -> executor close.
 - Producers never place orders directly.
 - Executor stays limit/chase-limit oriented.
+- The Rust bot is a separate managed runtime, not part of the Python live-agent decision flow.
+- Do not run Python execution changes and Rust perp execution changes as if they were one engine.
 
 ## Hyperliquid + node2 protocol rules
 - Private node base (EVClaw-gated): `https://node2.evplus.ai/evclaw/info?key=<wallet>`
@@ -135,6 +140,7 @@ Double-check scope (each run):
 - Missing-in-DB vs on-venue positions.
 - Pending limit cancel/reconcile backlog.
 - Node/tracker auth/data-path health.
+- Rust bot process/session health, latest log freshness, and live HL account parity when `evclaw_rust/` is in use.
 - Evidence integrity (no inferred claims without file/API proof).
 - Cron installation state when expected: both EVClaw cron jobs present and enabled.
 

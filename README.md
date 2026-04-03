@@ -5,6 +5,9 @@ EVClaw is an autonomous AGI trading skill for Hyperliquid:
 - HIP3 builder stocks
 - Deterministic ops + OpenClaw agent supervision
 
+Embedded component:
+- `evclaw_rust/`: standalone Rust Hyperliquid perp bot managed from this repo
+
 It is designed to run on a fresh Linux VPS with no dependency on your private local file layout.
 
 AI/operator runtime contract:
@@ -27,6 +30,7 @@ Rules:
 - Producers do not execute orders directly.
 - Executor is limit-first/chase-limit workflow.
 - DB is the source of truth for active trades and reconciliation.
+- `evclaw_rust/` is a separate runtime and does not sit inside the Python live-agent decision chain.
 
 ## Requirements
 
@@ -56,6 +60,22 @@ openclaw cron list --json
 # EVCLAW_ROOT="${EVCLAW_ROOT:-$PWD}" python3 "$EVCLAW_ROOT/scripts/import_learning_seed.py"
 ./start.sh
 ```
+
+## Rust Hyperliquid perp bot
+
+The repo also contains a separate Rust Hyperliquid perp bot under `evclaw_rust/`.
+It keeps its own `.env`, logs, journal, and runtime state under that subdirectory.
+
+Canonical operator commands:
+
+```bash
+./scripts/evclaw_rust_status.sh
+./scripts/evclaw_rust_start.sh
+./scripts/evclaw_rust_restart.sh
+./scripts/evclaw_rust_logs.sh
+```
+
+The Rust bot is managed from this repo, but it should be treated as a separate engine from the Python OpenClaw flow.
 
 `bootstrap.sh` installs EVClaw into OpenClaw `skills/` and also installs helper skills:
 - `trade`

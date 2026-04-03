@@ -49,5 +49,14 @@ memory/circuit_breaker.yaml
 memory/symbol_blacklist.yaml
 
 # runtime docs artifacts (generated at runtime, not source docs)
+docs/
 docs/llm_decisions.jsonl
 docs/openclawdiary.md
+evclaw_rust/.env
+evclaw_rust/target/
+evclaw_rust/logs/
+evclaw_rust/state/
+evclaw_rust/state-live/
+evclaw_rust/state-live-backups/
+evclaw_rust/scored_wallets.json
+EVPOLY/

@@ -1,0 +1,7 @@
+/target
+.env
+/state/
+/state-live/
+/state-live-backups/
+/logs/
+/scored_wallets.json

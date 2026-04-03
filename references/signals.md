@@ -18,8 +18,10 @@ EVClaw processes signals from the tracker and workers for trading decisions.
 
 For HIP3 symbols (`xyz:`), the worker provides FLOW + OFM components combined into **HIP3_MAIN**:
 
-- **FLOW gate**: HL vs Massive spread divergence (z_signed vs dynamic_threshold)
-- **OFM confirm**: Predator OFM must align with FLOW direction
+- **FLOW component**: HL vs Massive spread divergence (z_signed vs dynamic_threshold)
+- **OFM component**: Predator OFM direction with confidence threshold
+- **Driver rule (current default)**: OR semantics. FLOW pass or OFM pass can drive.
+- **Conflict rule**: if both pass but directions differ, the signal is blocked.
 
 HIP3_MAIN is PRIMARY for HIP3 symbols and can trigger trades independently.
 
@@ -28,8 +30,13 @@ HIP3 signals stream over SSE as event `hip3-data` and are merged into context in
 ### HIP3 Data Source
 
 EVClaw does not run tracker-side HIP3 workers locally. EVClaw reads HIP3 data from tracker endpoints:
-- `https://tracker.evplus.ai/api/hip3/predator-state`
-- SSE `hip3-data` events
+- Primary: SSE `hip3-data` events from `https://tracker.evplus.ai:8443/sse/tracker?key=<wallet>`
+- REST (enrichment/state): `https://tracker.evplus.ai/api/hip3/predator-state?key=<wallet>`
+- REST (HIP3 symbol list): `https://tracker.evplus.ai/api/hip3-symbols?key=<wallet>`
+
+Auth requirement:
+- HIP3 REST endpoints require `?key=<wallet>` query parameter.
+- Calls without `key` return auth errors and can make HIP3 appear dark.
 
 ## Conviction Weights
 

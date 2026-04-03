@@ -5,6 +5,7 @@ Purpose: single source of truth for what command/tool to run, when to run it, an
 Scope:
 - Manual/advisor user commands (`/trade`, `/best3`, `/execute`, `/hedge`, `/stats`)
 - Deterministic ops tools (`hourly_ops.py`, repo update check, learning import/prune)
+- Rust Hyperliquid perp bot runtime tools (`scripts/evclaw_rust_*.sh`)
 - Runtime cache cleanup helper (`scripts/cleanup_runtime_artifacts.py`)
 
 Rules:
@@ -18,6 +19,8 @@ Rules:
 - User wants to execute a plan or ad-hoc manual trade: use `/execute`.
 - User wants to reduce portfolio directional risk: use `/hedge`.
 - User wants current wallet/equity/positions status: use `/stats`.
+- User wants Rust bot process/account/log status: use `scripts/evclaw_rust_status.sh`.
+- User wants Rust bot restart/start/log tail: use `scripts/evclaw_rust_restart.sh`, `scripts/evclaw_rust_start.sh`, `scripts/evclaw_rust_logs.sh`.
 - Scheduled health/reconcile/check loop: use `hourly_ops.py`.
 - Scheduled update-check only (no auto-update): use `scripts/check_repo_update.py`.
 - Optional learning bootstrap import: use `scripts/import_learning_seed.py`.
@@ -101,6 +104,42 @@ python3 "$EVCLAW_ROOT/openclaw_skills/stats/scripts/generate_stats.py"
 `openclaw_skills/stats/scripts/generate_stats.py:2`, `openclaw_skills/stats/scripts/generate_stats.py:9`, `openclaw_skills/stats/scripts/generate_stats.py:123`, `openclaw_skills/stats/scripts/generate_stats.py:185`, `openclaw_skills/stats/scripts/generate_stats.py:418`.
 
 ## Deterministic ops tools
+
+`scripts/evclaw_rust_status.sh`
+- When to use: inspect the embedded Rust Hyperliquid perp bot runtime.
+- Run:
+```bash
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+"$EVCLAW_ROOT/scripts/evclaw_rust_status.sh"
+```
+- Behavior:
+1. Reports tmux session state.
+2. Reports configured wallet and latest log.
+3. Fetches live HL equity, positions, and open order counts using the Rust bot env.
+
+`scripts/evclaw_rust_start.sh`
+- When to use: start the embedded Rust bot if it is not already running.
+- Run:
+```bash
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+"$EVCLAW_ROOT/scripts/evclaw_rust_start.sh"
+```
+
+`scripts/evclaw_rust_restart.sh`
+- When to use: restart the embedded Rust bot after approved changes.
+- Run:
+```bash
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+"$EVCLAW_ROOT/scripts/evclaw_rust_restart.sh"
+```
+
+`scripts/evclaw_rust_logs.sh`
+- When to use: tail the latest Rust bot log.
+- Run:
+```bash
+EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
+"$EVCLAW_ROOT/scripts/evclaw_rust_logs.sh"
+```
 
 `hourly_ops.py`
 - When to use: deterministic maintenance, audit, reconcile, safety checks.
