@@ -1,11 +1,22 @@
 # Live Agent Mode (Context → Proposal Writer → Entry Gate → Execute)
 
-This repo now runs in **live agent** mode:
+This repo contains a Python **live agent** mode and a separate embedded Rust perp bot.
+
+This page documents the Python live-agent path only:
 
 - `cycle_trigger.py` saves the cycle, builds context (text + JSON), then emits a small system event.
 - `live_agent.py` builds scored candidates via `proposal_writer.py`.
 - `llm_entry_gate.py` (OpenClaw agent; defaults to `default`) chooses PICK/REJECT from those candidates.
 - Each approved pick executes on any **enabled** venue where the symbol is tradable.
+
+The embedded Rust bot lives under `evclaw_rust/` and is operated through:
+
+- `scripts/evclaw_rust_status.sh`
+- `scripts/evclaw_rust_start.sh`
+- `scripts/evclaw_rust_restart.sh`
+- `scripts/evclaw_rust_logs.sh`
+
+It is not driven by `live_agent.py`, `proposal_writer.py`, or the Python entry-gate flow described below.
 
 ## Cycle Trigger Behavior
 
@@ -68,4 +79,4 @@ Notes:
 - Fill reconciler heartbeat:
   - `/tmp/evclaw_fill_reconciler_heartbeat.json`
 
-Runtime paths are hard-coded to `${EVCLAW_RUNTIME_DIR}`.
+Runtime paths above are for the Python live-agent path and are scoped to `${EVCLAW_RUNTIME_DIR}`.

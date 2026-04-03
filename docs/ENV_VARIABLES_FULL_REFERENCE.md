@@ -1,7 +1,12 @@
 # EVClaw Environment Variables (OSS Baseline)
 
-This reference documents the active EVClaw runtime environment variables.
+This reference documents the Python/OpenClaw EVClaw runtime environment variables.
 Legacy aliases are intentionally removed in this clean-slate OSS package.
+
+The embedded Rust perp bot under `evclaw_rust/` has its own separate env surface in:
+
+- `evclaw_rust/.env`
+- `evclaw_rust/.env.example`
 
 ## Core Runtime
 
@@ -25,8 +30,9 @@ Legacy aliases are intentionally removed in this clean-slate OSS package.
 | `EVCLAW_SSE_HOST` | `tracker.evplus.ai` | No | SSE host. |
 | `EVCLAW_SSE_PORT` | `8443` | No | SSE port. |
 | `EVCLAW_SSE_ENDPOINT` | `/sse/tracker` | No | SSE endpoint path. |
-| `EVCLAW_TRACKER_HIP3_PREDATOR_URL` | `${EVCLAW_TRACKER_BASE_URL}/api/hip3/predator-state` | No | HIP3 predator state URL. |
-| `EVCLAW_TRACKER_HIP3_SYMBOLS_URL` | `${EVCLAW_TRACKER_BASE_URL}/api/hip3-symbols` | No | HIP3 symbols URL. |
+| `EVCLAW_SSE_PROFILE` | `evclaw-lite` | No | Optional tracker SSE profile override; set `full` for unfiltered payloads. |
+| `EVCLAW_TRACKER_HIP3_PREDATOR_URL` | `${EVCLAW_TRACKER_BASE_URL}/api/hip3/predator-state?key=<wallet>` | No | HIP3 predator state URL. If you override it manually, include `?key=<wallet>`. |
+| `EVCLAW_TRACKER_HIP3_SYMBOLS_URL` | `${EVCLAW_TRACKER_BASE_URL}/api/hip3-symbols?key=<wallet>` | No | HIP3 symbols URL. If you override it manually, include `?key=<wallet>`. |
 | `EVCLAW_TRACKER_SYMBOL_URL_TEMPLATE` | `${EVCLAW_TRACKER_BASE_URL}/api/symbols/{symbol_upper}.json` | No | Per-symbol tracker metadata URL template. |
 
 ## Venue Routing

@@ -2,16 +2,32 @@
 
 ## Files and precedence
 
-EVClaw uses **both**:
+For the Python/OpenClaw runtime, EVClaw uses **both**:
 
 - `skill.yaml` (canonical, versioned defaults + structured config)
 - `.env` (machine-local secrets + optional overrides)
 
-**Effective config precedence**:
+**Effective Python runtime config precedence**:
 
 1) `skill.yaml` defaults
 2) `config_env.py:apply_env_overrides()` applies selected env overrides (connectivity + runtime wiring only, e.g. SSE host/port, DB path)
 3) Some subsystems also support additional env-only knobs (legacy/runtime flags)
+
+## Embedded Rust Bot Configuration
+
+The repo also contains a separate Rust Hyperliquid perp bot under `evclaw_rust/`.
+
+That runtime does **not** read `skill.yaml`. It uses its own config surface:
+
+- `evclaw_rust/.env`
+- `evclaw_rust/.env.example`
+- `evclaw_rust/src/config.rs`
+
+Important boundary:
+
+- `skill.yaml` + top-level `.env` configure the Python/OpenClaw runtime.
+- `evclaw_rust/.env` configures the embedded Rust perp bot.
+- The Rust bot is operated through `scripts/evclaw_rust_*.sh`, not through the Python `start.sh` / `restart.sh` flow.
 
 ## `.env.min`
 

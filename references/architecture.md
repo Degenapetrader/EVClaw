@@ -2,6 +2,11 @@
 
 ## System Architecture
 
+EVClaw now contains two separate runtime surfaces:
+
+1. The Python/OpenClaw live-agent system for tracker-driven trading and ops.
+2. The embedded Rust Hyperliquid perp bot under `evclaw_rust/`, which is operated from this repo but is not part of the Python live-agent decision chain.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         EVClaw System                                │
@@ -34,6 +39,31 @@
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+## Embedded Rust Runtime
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Embedded Rust Perp Bot                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Wallet labels + HL /info + Binance/HL ATR → Combined signal        │
+│                                     ↓                               │
+│                          `evclaw_rust/src/runtime.rs`               │
+│                                     ↓                               │
+│                       Chase-limit executor + SL/TP repair           │
+│                                     ↓                               │
+│                         Hyperliquid perp account                    │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Canonical operator surface for the Rust bot:
+
+- `scripts/evclaw_rust_status.sh`
+- `scripts/evclaw_rust_start.sh`
+- `scripts/evclaw_rust_restart.sh`
+- `scripts/evclaw_rust_logs.sh`
 
 ## Live Agent Flow
 
@@ -82,6 +112,16 @@ Cycle Trigger → Cycle File + Context → System Event → Main Agent (gpt-5.2)
 | Fill Reconciler | `fill_reconciler.py` | Order fill reconciliation |
 | HIP3 Main | `hip3_main.py` | HIP3 signal processing |
 
+### Embedded Rust Bot
+
+| Component | File/Path | Purpose |
+|-----------|-----------|---------|
+| Runtime | `evclaw_rust/src/runtime.rs` | Main cycle loop, exits, entries, SL/TP reconcile |
+| HL client | `evclaw_rust/src/hyperliquid.rs` | Hyperliquid data/execution client |
+| Journal | `evclaw_rust/src/journal.rs` | SQLite trade/fill journal |
+| Config | `evclaw_rust/.env` + `evclaw_rust/src/config.rs` | Rust bot runtime config |
+| Ops wrappers | `scripts/evclaw_rust_*.sh` | Start/restart/status/log commands |
+
 ## Data Flow
 
 1. **Signal Ingestion**: SSE consumer receives signals from tracker
@@ -91,6 +131,14 @@ Cycle Trigger → Cycle File + Context → System Event → Main Agent (gpt-5.2)
 5. **Risk Assessment**: Risk manager validates and sizes positions
 6. **Execution**: Executor places orders on appropriate venue
 7. **Learning**: Learning engine updates weights from outcomes
+
+Rust bot data flow:
+
+1. **Wallet scan**: Hyperliquid `/info` wallet/account snapshot
+2. **Signal evaluation**: combined `dead_cap` + `whale` logic in Rust
+3. **Execution**: chase-limit entries/exits on Hyperliquid perps
+4. **Protection**: exchange-native SL/TP placement and periodic repair
+5. **Persistence**: JSON state + SQLite journal under `evclaw_rust/state-live/`
 
 ## Entry Gate Runtime Controls
 
