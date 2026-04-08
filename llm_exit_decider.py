@@ -32,6 +32,7 @@ import fcntl
 import hashlib
 import json
 import logging
+import math
 import os
 import sqlite3
 import sys
@@ -1711,11 +1712,37 @@ def _load_exposure_context(
     Uses latest snapshot; if missing tries previous snapshot; if still missing returns {}.
     """
     ctx: Dict[str, Any] = {}
-    max_mult = float(EXIT_MAX_NET_EXPOSURE_MULT if EXIT_MAX_NET_EXPOSURE_MULT > 0 else 2.0)
+    max_mult = float(
+        EXIT_MAX_NET_EXPOSURE_MULT
+        if math.isfinite(EXIT_MAX_NET_EXPOSURE_MULT) and EXIT_MAX_NET_EXPOSURE_MULT > 0
+        else 2.0
+    )
     max_age_sec = max(0.0, float(max_age_sec))
     now_ts = time.time()
 
+    # Backward compatible: try query with hl_wallet_equity, fallback if column missing
     try:
+        if conn is not None:
+            rows = conn.execute(
+                """
+                SELECT ts, ts_iso, hl_equity, hl_net_notional, hl_wallet_equity
+                FROM monitor_snapshots
+                ORDER BY ts DESC
+                LIMIT 2
+                """
+            ).fetchall()
+        else:
+            with _db_connect(db_path) as local_conn:
+                rows = local_conn.execute(
+                    """
+                    SELECT ts, ts_iso, hl_equity, hl_net_notional, hl_wallet_equity
+                    FROM monitor_snapshots
+                    ORDER BY ts DESC
+                    LIMIT 2
+                    """
+                ).fetchall()
+    except sqlite3.OperationalError:
+        # Column doesn't exist in old DBs - fall back to basic query
         if conn is not None:
             rows = conn.execute(
                 """
@@ -1735,13 +1762,24 @@ def _load_exposure_context(
                     LIMIT 2
                     """
                 ).fetchall()
-        for r in rows:
+    
+    for r in rows:
+        try:
+            snap_ts = float((r["ts"] if isinstance(r, sqlite3.Row) else r[0]) or 0.0)
+            # Use max(perps_equity, wallet_equity) to handle tiny-positive hl_equity bug
+            hl_eq = float((r["hl_equity"] if isinstance(r, sqlite3.Row) else r[2]) or 0.0)
+            hl_wallet_eq = None
             try:
-                snap_ts = float((r["ts"] if isinstance(r, sqlite3.Row) else r[0]) or 0.0)
-                hl_eq = float((r["hl_equity"] if isinstance(r, sqlite3.Row) else r[2]) or 0.0)
-                hl_net = float((r["hl_net_notional"] if isinstance(r, sqlite3.Row) else r[3]) or 0.0)
-            except Exception:
-                continue
+                hl_wallet_eq = float((r["hl_wallet_equity"] if isinstance(r, sqlite3.Row) else r[4]) or 0.0)
+            except (KeyError, IndexError):
+                pass
+            if hl_eq is not None and hl_wallet_eq is not None:
+                hl_eq = max(hl_eq, hl_wallet_eq)
+            elif hl_wallet_eq is not None and hl_eq == 0:
+                hl_eq = hl_wallet_eq
+            hl_net = float((r["hl_net_notional"] if isinstance(r, sqlite3.Row) else r[3]) or 0.0)
+        except Exception:
+            continue
             if max_age_sec > 0 and snap_ts > 0 and (now_ts - snap_ts) > max_age_sec:
                 continue
             if hl_eq > 0:
