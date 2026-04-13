@@ -1,8 +1,10 @@
 ---
 name: execute
-description: "Execute manual trades via plan ID or ad-hoc input. Supports `/execute <PLAN_ID> chase|limit [ttl]` and `/execute long ETH chase [size] [ttl]`."
+description: "Execute manual trades via plan ID or ad-hoc direction/symbol input on Hyperliquid. Use when the user wants to execute a stored trade plan, run a chase or limit order, or place an ad-hoc manual trade. Supports /execute PLAN_ID chase|limit and /execute long ETH chase size ttl patterns."
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
+metadata:
+  version: "1.0.0"
+  openclaw: '{"requires":{"bins":["python3"]}}'
 ---
 
 # /execute (manual plan execution)

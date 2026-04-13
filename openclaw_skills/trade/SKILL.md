@@ -1,8 +1,10 @@
 ---
 name: trade
-description: "Advisor-mode manual trade planner. `/trade <SYMBOL> [long|short] [$SIZE]` returns a compact plan with 2 entry styles (FAST chase vs RESTING limit) and stores it for `/execute`."
+description: "Advisor-mode manual trade planner for Hyperliquid perps and HIP3 stocks. Use when the user wants to plan a trade, get trading ideas, or analyze a specific symbol. /trade SYMBOL returns a compact plan with two entry styles (FAST chase vs RESTING SR/ATR limit) and stores it for /execute."
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
+metadata:
+  version: "1.0.0"
+  openclaw: '{"requires":{"bins":["python3"]}}'
 ---
 
 # /trade (advisor-mode)

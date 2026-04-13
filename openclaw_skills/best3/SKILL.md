@@ -1,8 +1,10 @@
 ---
 name: best3
-description: "Deterministic manual trade picker. `/best3` returns up to 3 Hyperliquid perp setups (FAST chase vs RESTING SR/ATR limit) and stores each plan for `/execute`."
+description: "Deterministic manual trade picker for Hyperliquid perps. Use when the user wants top trading opportunities, best setups, or crypto perpetual trade ideas. /best3 returns up to 3 ranked setups with FAST chase and RESTING SR/ATR limit entry options, and stores each plan for /execute."
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
+metadata:
+  version: "1.0.0"
+  openclaw: '{"requires":{"bins":["python3"]}}'
 ---
 
 # /best3 (deterministic)
@@ -24,7 +26,9 @@ Optional:
 
 The script will:
 - Load latest `evclaw_candidates_*.json`
+- If no candidate snapshot exists, abort with message: "No candidate data available — wait for next cycle or check SSE connection."
 - Rank candidates by `blended_conviction` (fallbacks to `conviction`)
+- If fewer than N candidates meet minimum conviction, return only those available with a note.
 - Allocate plan IDs in `manual_trade_plans`
 - Build deterministic setups with:
   - LIVE HL mid + BBO
@@ -32,6 +36,8 @@ The script will:
   - Post-only safe limit nudging
 - Write `/tmp/manual_trade_plan_<ID>.json`
 - Store READY rows in `manual_trade_plans` for `/execute <ID> chase|limit`
+
+Related skills: see [/execute](../execute/SKILL.md) for plan execution, [/trade](../trade/SKILL.md) for single-symbol advisor mode.
 
 ## Output rules
 - One-shot, normie-friendly.

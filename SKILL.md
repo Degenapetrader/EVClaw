@@ -1,6 +1,6 @@
 ---
-name: EVClaw
-description: Trading skill for executing live agent trades on Lighter (crypto perps) and Hyperliquid (HIP3 stocks). Use when user asks about trading, positions, signals, executing trades, live agent mode, cycle files, or managing EVClaw operations. Supports (1) Running live agent cycles via /live-agent, (2) Executing manual trades via /trade and /execute, (3) Viewing signals/positions, (4) Managing trading configuration, (5) Understanding signal types and decision logic, (6) Agent-driven incident response and triage.
+name: ev-claw
+description: "Autonomous AGI trading skill for Hyperliquid perps and HIP3 builder stocks. Use when the user asks about live trading, positions, signals, executing trades, cycle management, or EVClaw operations. Supports running live agent cycles via /live-agent, executing manual trades via /trade and /execute, viewing signals and positions, managing trading configuration, understanding conviction-based decision logic, and agent-driven incident response."
 ---
 
 # EVClaw Trading Skill
