@@ -1,8 +1,10 @@
 ---
 name: stats
-description: "Deterministic wallet dashboard. `/stats` shows live equity/exposure/positions/health for the user wallet (perps + builder/HIP3, live-first with DB fallback)."
+description: "Deterministic wallet dashboard for Hyperliquid perps and HIP3 builder stocks. Use when the user asks for portfolio overview, account balance, PnL, position health, or types /stats. Shows live equity, exposure, open positions, and health metrics with DB fallback when live fetch fails."
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
+metadata:
+  version: "1.0.0"
+  openclaw: '{"requires":{"bins":["python3"]}}'
 ---
 
 # /stats (deterministic, live-first)
@@ -22,4 +24,15 @@ Options:
 - `--wallet 0x...` (defaults to `HYPERLIQUID_ADDRESS`)
 - `--db /path/to/evclaw/ai_trader.db`
 
-Output: compact, actionable, normie-friendly.
+Output format (example):
+```
+Equity: $12,450.32
+Net Exposure: $3,200 (25.7%)
+Positions: 3 open (2 perps, 1 HIP3)
+  ETH LONG  $1,500  +2.3%
+  BTC SHORT $1,200  -0.8%
+  xyz:NVDA LONG $500  +1.1%
+Health: OK (no alerts)
+```
+
+Related skills: see [/trade](../trade/SKILL.md) for planning trades, [/best3](../best3/SKILL.md) for top opportunities.
