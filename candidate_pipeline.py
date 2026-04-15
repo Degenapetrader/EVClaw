@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,6 +15,19 @@ from live_agent_utils import MAX_CANDIDATES
 
 
 _SKILL_FILE = Path(__file__).with_name("skill.yaml")
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return bool(default)
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+LEARNING_ADAPTIVE_ENABLED = _env_bool("EVCLAW_LEARNING_ENABLED", True) and _env_bool(
+    "EVCLAW_ADAPTIVE_ENABLED",
+    True,
+)
 
 
 def _load_skill_hip3_cfg() -> Dict[str, Any]:
@@ -155,6 +169,8 @@ def _adaptive_candidate_top_k(
     strong_count: int,
 ) -> int:
     """Adaptive candidate count based on cycle quality and strong-signal floor."""
+    if not LEARNING_ADAPTIVE_ENABLED:
+        return max(1, int(base_limit or MAX_CANDIDATES))
     min_k, max_k, score_gate = _adaptive_topk_settings()
     max_cap = max(1, max_k, int(strong_count))
     min_cap = max(1, min(min_k, max_cap))
@@ -232,6 +248,8 @@ def _hip3_booster_size_mult(hip3_main: Dict[str, Any]) -> float:
 
 def _default_context_learning_engine() -> Optional[ContextLearningEngine]:
     """Lazily initialize a process-local context-learning engine once."""
+    if not LEARNING_ADAPTIVE_ENABLED:
+        return None
     global _CONTEXT_LEARNING_SINGLETON, _CONTEXT_LEARNING_INIT_FAILED
     if _CONTEXT_LEARNING_SINGLETON is not None:
         return _CONTEXT_LEARNING_SINGLETON
@@ -422,7 +440,7 @@ def build_candidates_from_context(
         dossier_db_path = str(getattr(db, "db_path", "") or "")
     except Exception:
         dossier_db_path = ""
-    if dossier_db_path:
+    if LEARNING_ADAPTIVE_ENABLED and dossier_db_path:
         try:
             from learning_dossier_aggregator import get_dossier_snippet
             dossier_getter = get_dossier_snippet

@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from logging_utils import get_logger
+import os
 import signal
 import time
 from datetime import datetime, timezone
@@ -26,6 +27,17 @@ HEARTBEAT_INTERVAL = 15  # seconds
 MAE_MFE_MAX_CONCURRENCY = 2
 MAE_MFE_TIMEOUT_SEC = 45.0
 MAE_MFE_MIN_INTERVAL_SEC = 0.75
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return bool(default)
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+LEARNING_ENABLED = _env_bool("EVCLAW_LEARNING_ENABLED", True)
+ADAPTIVE_ENABLED = _env_bool("EVCLAW_ADAPTIVE_ENABLED", True)
 
 # Load environment variables from .env BEFORE any imports that use them
 load_dotenv(SKILL_DIR / ".env")
@@ -54,8 +66,10 @@ def load_config() -> Dict[str, Any]:
     return apply_env_overrides({})
 
 
-def build_learning_engine(db_path: str, config: Dict[str, Any]) -> LearningEngine:
+def build_learning_engine(db_path: str, config: Dict[str, Any]) -> Optional[LearningEngine]:
     """Create learning engine for close-time processing."""
+    if not LEARNING_ENABLED:
+        return None
     return LearningEngine(
         db_path=db_path,
         memory_dir=Path(config.get("config", {}).get("context_builder", {}).get("memory_dir", SKILL_DIR / "memory")),
@@ -235,10 +249,11 @@ def build_on_trade_close(
             pass
 
         # 1) Enqueue reflection task for the learning reflector worker (non-blocking).
-        _queue_task(
-            asyncio.to_thread(_enqueue_reflection_task, trade_id, payload.get("symbol")),
-            label=f"reflection enqueue for trade {trade_id}",
-        )
+        if LEARNING_ENABLED:
+            _queue_task(
+                asyncio.to_thread(_enqueue_reflection_task, trade_id, payload.get("symbol")),
+                label=f"reflection enqueue for trade {trade_id}",
+            )
 
         # 2) Queue built-in learning engine (optional).
         if learning_engine and hasattr(learning_engine, "process_closed_trade"):
@@ -248,22 +263,25 @@ def build_on_trade_close(
             )
 
         # 3) Best-effort Symbol RR refresh (MAE/MFE + policy update).
-        _queue_task(
-            _refresh_symbol_rr(trade_id, payload.get("symbol")),
-            label=f"symbol RR refresh for trade {trade_id}",
-        )
+        if ADAPTIVE_ENABLED:
+            _queue_task(
+                _refresh_symbol_rr(trade_id, payload.get("symbol")),
+                label=f"symbol RR refresh for trade {trade_id}",
+            )
 
         # 4) Best-effort symbol dossier refresh.
-        _queue_task(
-            _update_symbol_dossier(trade_id),
-            label=f"symbol dossier update for trade {trade_id}",
-        )
+        if LEARNING_ENABLED:
+            _queue_task(
+                _update_symbol_dossier(trade_id),
+                label=f"symbol dossier update for trade {trade_id}",
+            )
 
         # 5) Persist close features for adaptive conviction learning.
-        _queue_task(
-            _store_features_then_adapt(trade_id),
-            label=f"trade feature capture + adaptive update for trade {trade_id}",
-        )
+        if ADAPTIVE_ENABLED:
+            _queue_task(
+                _store_features_then_adapt(trade_id),
+                label=f"trade feature capture + adaptive update for trade {trade_id}",
+            )
 
         # 6) Link closed-trade outcomes back to entry-gate decisions.
         _queue_task(

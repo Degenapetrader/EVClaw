@@ -21,6 +21,8 @@ Rules:
 - User wants current wallet/equity/positions status: use `/stats`.
 - User wants Rust bot process/account/log status: use `scripts/evclaw_rust_status.sh`.
 - User wants Rust bot restart/start/log tail: use `scripts/evclaw_rust_restart.sh`, `scripts/evclaw_rust_start.sh`, `scripts/evclaw_rust_logs.sh`.
+- User wants to create a DegenClaw ACP job directly from EVClaw: use `node scripts/dgclaw_acp_job.js ...`.
+- User wants to join DegenClaw leaderboard and save the returned API key: use `node scripts/dgclaw_acp_job.js join`.
 - Scheduled health/reconcile/check loop: use `hourly_ops.py`.
 - Scheduled update-check only (no auto-update): use `scripts/check_repo_update.py`.
 - Optional learning bootstrap import: use `scripts/import_learning_seed.py`.
@@ -140,6 +142,40 @@ EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
 EVCLAW_ROOT="${EVCLAW_ROOT:-$HOME/.openclaw/skills/EVClaw}" \
 "$EVCLAW_ROOT/scripts/evclaw_rust_logs.sh"
 ```
+
+`node scripts/dgclaw_acp_job.js`
+- When to use: create a direct ACP job against the DegenClaw provider without relying on the separate DegenClaw skill.
+- Required env:
+`ACP_CLIENT_PRIVATE_KEY`, `ACP_CLIENT_WALLET_ADDRESS`, `ACP_SESSION_ENTITY_KEY_ID`
+- Provider:
+`0xd478a8B40372db16cA8045F28C6FE07228F3781A`
+- Run examples:
+```bash
+node scripts/dgclaw_acp_job.js join
+node scripts/dgclaw_acp_job.js perp_trade --action open --pair BTC --side long --size 10 --leverage 5 --stopLoss 93000 --takeProfit 98000
+node scripts/dgclaw_acp_job.js perp_trade --action close --pair BTC
+node scripts/dgclaw_acp_job.js perp_modify --pair BTC --stopLoss 93000 --takeProfit 98000
+node scripts/dgclaw_acp_job.js perp_deposit --amount 100
+node scripts/dgclaw_acp_job.js perp_withdraw --amount 25 --recipient 0x0000000000000000000000000000000000000000
+node scripts/dgclaw_acp_job.js perp_trade --action open --pair BTC --side long --size 10 --leverage 5 --dry-run
+```
+- `join` behavior:
+1. Generates a temporary 2048-bit RSA keypair
+2. Creates a `join_leaderboard` ACP job with `{ agentAddress, publicKey }`
+3. Auto-pays if ACP moves the job into `NEGOTIATION`
+4. Waits for completion
+5. Decrypts `encryptedApiKey`
+6. Saves `DGCLAW_API_KEY` into EVClaw `.env`
+- live job behavior for `perp_deposit`, `perp_trade`, and `perp_withdraw`:
+1. Creates the ACP job
+2. Auto-pays if ACP moves the job into `NEGOTIATION`
+3. Waits for `COMPLETED`, `REJECTED`, or `EXPIRED`
+4. Prints the final deliverable/result payload
+- Supported requirement schemas:
+`perp_trade { action: "open" | "close", pair: string, side?: "long" | "short", size?: string, leverage?: number, orderType?: "market" | "limit", limitPrice?: string, stopLoss?: string, takeProfit?: string }`
+`perp_modify { pair: string, leverage?: number, stopLoss?: string, takeProfit?: string }`
+`perp_withdraw { amount: string, recipient?: string }`
+`perp_deposit { amount: string }`
 
 `hourly_ops.py`
 - When to use: deterministic maintenance, audit, reconcile, safety checks.

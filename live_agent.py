@@ -127,6 +127,10 @@ def _env_bool(name: str, default: bool) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
+LEARNING_ENABLED = _env_bool("EVCLAW_LEARNING_ENABLED", True)
+ADAPTIVE_ENABLED = _env_bool("EVCLAW_ADAPTIVE_ENABLED", True)
+
+
 def _normalize_pct_cap(value: Any, default_pct: float = 25.0) -> float:
     try:
         raw = float(value)
@@ -315,6 +319,8 @@ def _runtime_conviction_config(db: Optional[AITraderDB], ttl_seconds: float = 60
 
 def _get_learning_engine(db_path: str):
     """Get or create a module-level learning engine bound to a DB path."""
+    if not (LEARNING_ENABLED and ADAPTIVE_ENABLED):
+        return None
     key = str(db_path or DEFAULT_DB).strip() or str(DEFAULT_DB)
     cached = _LEARNING_ENGINES.get(key)
     if cached is not None:

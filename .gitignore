@@ -4,6 +4,7 @@ venv/
 .env
 .env.*
 !.env.example
+node_modules/
 *.pyc
 *.log
 *.db
@@ -11,6 +12,8 @@ venv/
 *.db-shm
 state/
 signals/
+!acptrade/src/signals/
+!acptrade/src/signals/**
 memory/
 memory/positions.yaml
 memory/positions.lock

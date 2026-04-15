@@ -27,7 +27,6 @@ SESSIONS=(
   [evclaw-decay]="$EVCLAW_PYTHON decay_worker.py --signal-flip-only --notify-only 2>&1"
   [evclaw-review]="$EVCLAW_PYTHON position_review_worker.py --record-holds 2>&1"
   [evclaw-fill-reconciler]="$EVCLAW_PYTHON run_fill_reconciler.py --mode hybrid 2>&1"
-  [evclaw-learning-reflector]="$EVCLAW_PYTHON learning_reflector_worker.py 2>&1"
 )
 
 # Order matters:
@@ -36,7 +35,6 @@ SESSIONS=(
 # - trigger last
 ORDER=(
   evclaw-fill-reconciler
-  evclaw-learning-reflector
   evclaw-decay
   evclaw-review
   evclaw-exit-decider

@@ -28,6 +28,17 @@ from venues import normalize_venue
 HEARTBEAT_FILE = Path("/tmp/evclaw_fill_reconciler_heartbeat.json")
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return bool(default)
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+LEARNING_ENABLED = _env_bool("EVCLAW_LEARNING_ENABLED", True)
+ADAPTIVE_ENABLED = _env_bool("EVCLAW_ADAPTIVE_ENABLED", True)
+
+
 def normalize_hl_base_url(raw: str) -> str:
     base = (raw or "").strip()
     if not base:
@@ -248,7 +259,9 @@ def build_hybrid_sltp(
     *,
     db_path: Optional[str],
     skill_dir: Path,
-) -> HybridSLTPAdapter:
+) -> Optional[HybridSLTPAdapter]:
+    if not ADAPTIVE_ENABLED:
+        return None
     adaptive_cfg = AdaptiveSLTPConfig(
         default_sl_mult=float(exec_config.sl_atr_multiplier),
         default_tp_mult=float(exec_config.tp_atr_multiplier),
@@ -267,7 +280,7 @@ async def build_executor_with_learning(
     tracker: TradeTracker,
     *,
     db_path: Optional[str],
-    build_hybrid_sltp_fn: Callable[..., HybridSLTPAdapter],
+    build_hybrid_sltp_fn: Callable[..., Optional[HybridSLTPAdapter]],
     executor_cls: Any,
 ) -> Executor:
     hybrid_sltp = build_hybrid_sltp_fn(exec_config, tracker, db_path=db_path)

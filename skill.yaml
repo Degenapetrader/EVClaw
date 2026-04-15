@@ -141,7 +141,7 @@ config:
     max_position_per_symbol_usd: 0.0
     max_total_exposure_usd: 100000000.0
     enable_sltp_backstop: true
-    adaptive_on_override: true
+    adaptive_on_override: false
     sl_atr_multiplier: 2.0
     tp_atr_multiplier: 3.0
     sl_fallback_pct: 2.0
@@ -175,7 +175,7 @@ config:
     sr_limit_reachable_atr_per_hour: 2.0
     sr_limit_prefill_sl_hl: true
   learning:
-    enabled: true
+    enabled: false
     min_trades_for_adjustment: 30
     min_symbol_trades: 10
     weight_bounds:
@@ -360,15 +360,4 @@ phases:
     - atr_based_sizing
     - exposure_limits
   phase5_learning:
-    status: implemented
-    files:
-    - learning_engine.py
-    features:
-    - per_signal_expectancy_tracking
-    - symbol_specific_weights
-    - statistical_significance_testing
-    - bayesian_weight_updates
-    - atomic_persistence
-    - trade_attribution_shapley_lite
-    - orphan_handling
-    - auto_update_triggers
+    status: disabled

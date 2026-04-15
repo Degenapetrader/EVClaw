@@ -129,7 +129,6 @@ ensure_evclaw_agent_env_defaults() {
     "EVCLAW_HIP3_LLM_GATE_AGENT_ID=evclaw-hip3-entry-gate"
     "EVCLAW_EXIT_DECIDER_AGENT_ID=evclaw-exit-decider"
     "EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID=evclaw-hip3-exit-decider"
-    "EVCLAW_LEARNING_REFLECTOR_AGENT_ID=evclaw-learning-reflector"
   )
   local changed=0
   local key val cur
@@ -174,7 +173,6 @@ ensure_openclaw_isolated_agents() {
     "${EVCLAW_HIP3_LLM_GATE_AGENT_ID:-evclaw-hip3-entry-gate}|"
     "${EVCLAW_EXIT_DECIDER_AGENT_ID:-evclaw-exit-decider}|"
     "${EVCLAW_HIP3_EXIT_DECIDER_AGENT_ID:-evclaw-hip3-exit-decider}|"
-    "${EVCLAW_LEARNING_REFLECTOR_AGENT_ID:-evclaw-learning-reflector}|"
   )
 
   local spec agent_id model workspace
@@ -254,14 +252,6 @@ remind_builder_approval() {
   echo "Node2 quick test (RIGHT):"
   echo "  curl -X POST \"https://node2.evplus.ai/evclaw/info?key=\$HYPERLIQUID_ADDRESS\" -H \"Content-Type: application/json\" --data '{\"type\":\"meta\"}'"
   echo "Wrong: /evclaw/meta or /evclaw/info without ?key=..."
-}
-
-remind_learning_seed_option() {
-  echo "Optional learning warm-start (dry-run first, user-consent only):"
-  echo "  python3 scripts/import_learning_seed.py"
-  echo "Then apply only after explicit confirmation:"
-  echo "  python3 scripts/import_learning_seed.py --apply"
-  echo "Note: symbol_policy rows are optional and may be 0 for some seed versions."
 }
 
 remind_hip3_and_retention() {
@@ -401,7 +391,6 @@ ensure_openclaw_skill_link
 install_openclaw_helper_skills
 warn_if_missing_runtime_env
 remind_builder_approval
-remind_learning_seed_option
 remind_hip3_and_retention
 prepare_evclaw_rust_component
 

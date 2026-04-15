@@ -60,7 +60,6 @@ SESSION_NAMES = [
     "evclaw-exit-outcome",
     "evclaw-decay",
     "evclaw-review",
-    "evclaw-learning-reflector",
 ]
 
 OPEN_TRADE_VENUES = {"hyperliquid", "hip3", "hyperliquid_wallet"}
