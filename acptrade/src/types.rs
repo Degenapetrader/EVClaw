@@ -143,6 +143,65 @@ pub struct CombinedSignal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OiBucketPolicy {
+    #[serde(default = "default_bucket_label")]
+    pub bucket_label: String,
+    #[serde(default)]
+    pub oi_usd_at_entry: f64,
+    #[serde(default = "default_size_multiplier")]
+    pub size_multiplier: f64,
+    #[serde(default = "default_sl_atr_multiplier")]
+    pub sl_atr_multiplier: f64,
+    #[serde(default = "default_tp_atr_multiplier")]
+    pub tp_atr_multiplier: f64,
+    #[serde(default = "default_min_hold_hours")]
+    pub min_hold_hours: f64,
+}
+
+impl Default for OiBucketPolicy {
+    fn default() -> Self {
+        Self {
+            bucket_label: default_bucket_label(),
+            oi_usd_at_entry: 0.0,
+            size_multiplier: default_size_multiplier(),
+            sl_atr_multiplier: default_sl_atr_multiplier(),
+            tp_atr_multiplier: default_tp_atr_multiplier(),
+            min_hold_hours: default_min_hold_hours(),
+        }
+    }
+}
+
+impl OiBucketPolicy {
+    pub fn is_initialized(&self) -> bool {
+        !self.bucket_label.is_empty()
+            && self.size_multiplier > 0.0
+            && self.sl_atr_multiplier > 0.0
+            && self.tp_atr_multiplier > 0.0
+            && self.min_hold_hours > 0.0
+    }
+}
+
+fn default_bucket_label() -> String {
+    "legacy".to_string()
+}
+
+fn default_size_multiplier() -> f64 {
+    1.0
+}
+
+fn default_sl_atr_multiplier() -> f64 {
+    1.5
+}
+
+fn default_tp_atr_multiplier() -> f64 {
+    1.0
+}
+
+fn default_min_hold_hours() -> f64 {
+    6.0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeadCapSnapshot {
     pub symbol: String,
     pub signal: Direction,
@@ -167,6 +226,14 @@ pub struct DeadCapSnapshot {
 pub struct ReentryBlock {
     pub symbol: String,
     pub blocked_direction: Direction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolCooldown {
+    pub symbol: String,
+    pub blocked_until_ms: u64,
+    #[serde(default)]
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,11 +278,14 @@ pub struct UserFill {
     pub symbol: String,
     pub exchange_symbol: String,
     pub side: Direction,
+    pub dir_text: Option<String>,
     pub price: f64,
     pub size: f64,
     pub ts_ms: u64,
     pub oid: Option<u64>,
     pub tid: Option<u64>,
+    pub start_position: Option<f64>,
+    pub closed_pnl: Option<f64>,
     pub fee_usd: Option<f64>,
     pub builder_fee_usd: Option<f64>,
     pub crossed: bool,
@@ -231,6 +301,17 @@ pub struct AtrData {
     pub max_mult: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct AtrCheckpointData {
+    pub atr: f64,
+    pub high_4h_ago: f64,
+    pub low_4h_ago: f64,
+    pub high_8h_ago: f64,
+    pub low_8h_ago: f64,
+    pub high_12h_ago: f64,
+    pub low_12h_ago: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackedPosition {
     pub symbol: String,
@@ -244,6 +325,8 @@ pub struct TrackedPosition {
     pub opened_at_ms: u64,
     pub entry_signal: CombinedSignal,
     #[serde(default)]
+    pub bucket_policy: OiBucketPolicy,
+    #[serde(default)]
     pub trade_id: Option<i64>,
     #[serde(default = "default_entry_source")]
     pub entry_source: String,
@@ -253,6 +336,8 @@ pub struct TrackedPosition {
     pub acp_sltp_last_stop_price: f64,
     #[serde(default)]
     pub acp_sltp_last_take_profit_price: f64,
+    #[serde(default)]
+    pub pressure_exit_last_check_ms: u64,
 }
 
 fn default_entry_source() -> String {

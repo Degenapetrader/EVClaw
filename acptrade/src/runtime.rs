@@ -17,8 +17,9 @@ use crate::signals::dead_cap::DeadCapitalSignal;
 use crate::signals::whale::WhaleSignal;
 use crate::state::{RuntimeState, StateStore};
 use crate::types::{
-    AccountDataSnapshot, AccountSummary, CombinedSignal, DeadCapSnapshot, Direction, LivePosition,
-    MarketMeta, OpenOrder, SignalComponent, TrackedPosition,
+    AccountDataSnapshot, AccountSummary, AtrCheckpointData, CombinedSignal, DeadCapSnapshot,
+    Direction, LivePosition, MarketMeta, OiBucketPolicy, OpenOrder, SignalComponent,
+    SymbolCooldown, TrackedPosition, UserFill,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +35,24 @@ enum ExitDisposition {
     Closed,
     Detached,
     KeepTracking,
+}
+
+const PRESSURE_DECAY_CHECK_INTERVAL_MS: u64 = 15 * 60 * 1_000;
+const PRESSURE_DECAY_THRESHOLD_RATIO: f64 = 0.8;
+const LATE_ENTRY_GUARD_8H_ATR_SURCHARGE: f64 = 2.0;
+const LATE_ENTRY_GUARD_12H_ATR_SURCHARGE: f64 = 3.0;
+
+const DISAPPEARED_FILL_LOOKBACK_MS: u64 = 15 * 60 * 1_000;
+const DISAPPEARED_FILL_CLUSTER_MS: u64 = 2 * 60 * 1_000;
+
+#[derive(Debug, Clone, Copy)]
+struct LateEntryGuardMetrics {
+    extension_4h_atr: f64,
+    extension_8h_atr: f64,
+    extension_12h_atr: f64,
+    threshold_4h_atr: f64,
+    threshold_8h_atr: f64,
+    threshold_12h_atr: f64,
 }
 
 pub struct EvClawRuntime {
@@ -57,7 +76,8 @@ impl EvClawRuntime {
         labels.reload()?;
 
         let state_store = StateStore::new(state_path(&cfg.state_dir));
-        let state = state_store.load()?;
+        let mut state = state_store.load()?;
+        state.reentry_blocks.clear();
         let journal = TradeJournal::new(cfg.journal_path.clone())?;
 
         info!(
@@ -131,7 +151,9 @@ impl EvClawRuntime {
                 "[startup] dead_cap wallet coverage base={} expanded={} extra={}",
                 base_tracked_wallets.len(),
                 tracked_wallets.len(),
-                tracked_wallets.len().saturating_sub(base_tracked_wallets.len())
+                tracked_wallets
+                    .len()
+                    .saturating_sub(base_tracked_wallets.len())
             );
         }
 
@@ -192,6 +214,7 @@ impl EvClawRuntime {
         let active_acp_symbols = active_acp_open_symbols(&active_acp_jobs, &self.executor);
 
         self.release_reentry_blocks(&signals);
+        self.release_symbol_cooldowns();
         let positions_changed = self
             .sync_tracked_positions(&live_positions, &snapshot.market_meta, &signals)
             .await?;
@@ -218,16 +241,23 @@ impl EvClawRuntime {
             self.reconcile_sltp_orders(&active_acp_jobs).await?;
         }
         self.reconcile_fill_journal().await?;
+        if let Err(err) = self
+            .journal
+            .log_dead_cap_history(self.state.dead_cap_snapshots.values().cloned())
+        {
+            warn!("dead-cap history log failed: {err:#}");
+        }
 
         self.state_store.save(&self.state)?;
         if self.cycle_count.is_multiple_of(10) {
             self.log_summary("cycle")?;
         }
         info!(
-            "cycle complete symbols={} open_positions={} reentry_blocks={}",
+            "cycle complete symbols={} open_positions={} reentry_blocks={} symbol_cooldowns={}",
             snapshot.market_meta.len(),
             self.state.positions.len(),
-            self.state.reentry_blocks.len()
+            self.state.reentry_blocks.len(),
+            self.state.symbol_cooldowns.len()
         );
         Ok(())
     }
@@ -266,12 +296,14 @@ impl EvClawRuntime {
                 strength: whale_eval.strength,
                 reason: whale_eval.reason,
             };
+            let bucket_policy = oi_bucket_policy(market.oi_usd);
             let (net_score, target_direction, raw_notional_usd, order_notional_usd) =
                 combined_target(
                     &dead_component,
                     &whale_component,
                     self.cfg.base_notional_usd,
                     self.cfg.min_trade_notional_usd,
+                    &bucket_policy,
                 );
 
             decisions.insert(
@@ -286,12 +318,13 @@ impl EvClawRuntime {
                     raw_notional_usd,
                     order_notional_usd,
                     reason: format!(
-                        "net(dead-only)={:+.3} dead={}({:.2}) whale={}({:.2})",
+                        "net(dead-only)={:+.3} dead={}({:.2}) whale={}({:.2}) bucket={}",
                         net_score,
                         dead_eval.signal,
                         dead_eval.strength,
                         whale_eval.signal,
-                        whale_eval.strength
+                        whale_eval.strength,
+                        bucket_policy.bucket_label
                     ),
                 },
             );
@@ -338,6 +371,35 @@ impl EvClawRuntime {
         }
     }
 
+    fn release_symbol_cooldowns(&mut self) {
+        let now_ms = crate::now_ms();
+        self.state
+            .symbol_cooldowns
+            .retain(|_, cooldown| cooldown.blocked_until_ms > now_ms);
+    }
+
+    fn is_symbol_cooldown_active(&self, symbol: &str, now_ms: u64) -> bool {
+        self.state
+            .symbol_cooldowns
+            .get(symbol)
+            .map(|cooldown| cooldown.blocked_until_ms > now_ms)
+            .unwrap_or(false)
+    }
+
+    fn start_symbol_cooldown(&mut self, symbol: &str, reason: &str) {
+        let blocked_until_ms =
+            crate::now_ms().saturating_add(self.cfg.reentry_cooldown_secs.saturating_mul(1_000));
+        self.state.symbol_cooldowns.insert(
+            symbol.to_string(),
+            SymbolCooldown {
+                symbol: symbol.to_string(),
+                blocked_until_ms,
+                reason: reason.to_string(),
+            },
+        );
+        self.state.reentry_blocks.remove(symbol);
+    }
+
     async fn sync_tracked_positions(
         &mut self,
         live_positions: &HashMap<String, LivePosition>,
@@ -347,22 +409,44 @@ impl EvClawRuntime {
         let tracked_symbols: Vec<String> = self.state.positions.keys().cloned().collect();
         let mut remove_symbols = Vec::new();
         let mut changed = false;
+        let now_ms = crate::now_ms();
+        let recent_user_fills = if self.acp_executor.is_none() {
+            self.executor
+                .fetch_user_fills(Some(now_ms.saturating_sub(DISAPPEARED_FILL_LOOKBACK_MS)))
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
         for symbol in tracked_symbols {
             let Some(tracked) = self.state.positions.get(&symbol).cloned() else {
                 continue;
             };
+            let fallback_policy = market_meta
+                .get(&symbol)
+                .map(|meta| oi_bucket_policy(meta.oi_usd))
+                .unwrap_or_else(|| tracked.bucket_policy.clone());
+            let tracked_policy = resolved_bucket_policy(&tracked.bucket_policy, &fallback_policy);
             match live_positions.get(&symbol) {
                 None => {
+                    let recent_fill_price =
+                        recent_disappearance_fill_price(&tracked, &recent_user_fills, now_ms);
                     let (exit_price, exit_reason) = classify_disappeared_position(
                         &tracked,
                         market_meta.get(&symbol).map(|meta| meta.mark_px),
-                        self.cfg.sl_atr_multiplier,
-                        self.cfg.tp_atr_multiplier,
+                        recent_fill_price,
+                        tracked_policy.sl_atr_multiplier,
+                        tracked_policy.tp_atr_multiplier,
                     );
                     info!(
-                        "[{}] live position disappeared; classifying as {} @ {:.6}",
-                        symbol, exit_reason, exit_price
+                        "[{}] live position disappeared; classifying as {} @ {:.6}{}",
+                        symbol,
+                        exit_reason,
+                        exit_price,
+                        recent_fill_price
+                            .map(|price| format!(" via recent fill {:.6}", price))
+                            .unwrap_or_default()
                     );
                     let exit_signal = signals.get(&symbol);
                     let trade_id = match tracked.trade_id {
@@ -384,6 +468,9 @@ impl EvClawRuntime {
                         &format!("classified missing live position as {}", exit_reason),
                         exit_signal,
                     )?;
+                    if should_start_symbol_cooldown(&exit_reason) {
+                        self.start_symbol_cooldown(&symbol, &exit_reason);
+                    }
                     remove_symbols.push(symbol);
                     changed = true;
                 }
@@ -416,6 +503,15 @@ impl EvClawRuntime {
                         .and_then(|position| position.trade_id)
                         .or(existing_open_trade.as_ref().map(|trade| trade.id));
                     if let Some(tracked_mut) = self.state.positions.get_mut(&symbol) {
+                        if should_refresh_bucket_policy(&tracked_mut.bucket_policy)
+                            || (tracked_mut.bucket_policy.min_hold_hours
+                                - tracked_policy.min_hold_hours)
+                                .abs()
+                                > f64::EPSILON
+                        {
+                            tracked_mut.bucket_policy = tracked_policy.clone();
+                            changed = true;
+                        }
                         let mut trade_fill_sync_needed = false;
                         if let Some(open_trade) = existing_open_trade.as_ref() {
                             if (open_trade.size - live.qty).abs() > live_qty_epsilon(live.qty)
@@ -503,17 +599,22 @@ impl EvClawRuntime {
                     Some("discovered live position during sync"),
                 )?)
             };
+            let bucket_policy = market_meta
+                .get(&live.symbol)
+                .map(|meta| oi_bucket_policy(meta.oi_usd))
+                .unwrap_or_default();
             let (stop_price, take_profit_price) = self
                 .build_exit_levels(
                     &live.symbol,
                     &live.exchange_symbol,
                     live.direction,
                     live.entry_price,
+                    &bucket_policy,
                 )
                 .await
                 .unwrap_or((0.0, 0.0));
             let opened_at_ms =
-                estimated_adopted_open_time(crate::now_ms(), self.cfg.min_hold_hours);
+                estimated_adopted_open_time(crate::now_ms(), bucket_policy.min_hold_hours);
             info!(
                 "[{}] adopting unmanaged live {} qty={:.6} px={:.6}",
                 live.symbol, live.direction, live.qty, live.entry_price
@@ -531,11 +632,13 @@ impl EvClawRuntime {
                     take_profit_price,
                     opened_at_ms,
                     entry_signal,
+                    bucket_policy,
                     trade_id,
                     entry_source: "adopted".to_string(),
                     acp_sltp_last_submit_ms: 0,
                     acp_sltp_last_stop_price: 0.0,
                     acp_sltp_last_take_profit_price: 0.0,
+                    pressure_exit_last_check_ms: 0,
                 },
             );
             changed = true;
@@ -548,38 +651,105 @@ impl EvClawRuntime {
         signals: &HashMap<String, CombinedSignal>,
     ) -> Result<()> {
         let now_ms = crate::now_ms();
-        let min_hold_ms = (self.cfg.min_hold_hours * 3600.0 * 1000.0) as u64;
         let symbols: Vec<String> = self.state.positions.keys().cloned().collect();
 
         for symbol in symbols {
             let Some(position) = self.state.positions.get(&symbol).cloned() else {
                 continue;
             };
+            let min_hold_ms = (position.bucket_policy.min_hold_hours * 3600.0 * 1000.0) as u64;
             if now_ms.saturating_sub(position.opened_at_ms) < min_hold_ms {
                 continue;
             }
-            let Some(signal) = signals.get(&symbol) else {
+            let Some(snapshot) = self.state.dead_cap_snapshots.get(&symbol).cloned() else {
+                warn!(
+                    "[{}] pressure check skipped: missing dead-cap snapshot",
+                    symbol
+                );
                 continue;
             };
-            let dead_opposes = signal.dead_cap.direction.opposes(position.direction);
-            if !dead_opposes {
+            if position.pressure_exit_last_check_ms > 0
+                && now_ms.saturating_sub(position.pressure_exit_last_check_ms)
+                    < PRESSURE_DECAY_CHECK_INTERVAL_MS
+            {
+                continue;
+            }
+            if pressure_exit_skips_coverage_low(&snapshot) {
+                info!("[{}] pressure check skipped: {}", symbol, snapshot.reason);
+                if let Some(tracked) = self.state.positions.get_mut(&symbol) {
+                    tracked.pressure_exit_last_check_ms = now_ms;
+                }
+                continue;
+            }
+            let Some((pressure, threshold, cutoff)) =
+                pressure_exit_metrics(&position, &snapshot, PRESSURE_DECAY_THRESHOLD_RATIO)
+            else {
+                warn!(
+                    "[{}] pressure check skipped: invalid metrics signal={} strength={:.2} thr={:.2} effL={:.2}% effS={:.2}%",
+                    symbol,
+                    snapshot.signal,
+                    snapshot.strength,
+                    snapshot.threshold,
+                    snapshot.effective_long_pct,
+                    snapshot.effective_short_pct,
+                );
+                if let Some(tracked) = self.state.positions.get_mut(&symbol) {
+                    tracked.pressure_exit_last_check_ms = now_ms;
+                }
+                continue;
+            };
+
+            let age_h = now_ms.saturating_sub(position.opened_at_ms) as f64 / 3_600_000.0;
+            let monitored_side = match position.direction {
+                Direction::Short => "effL",
+                Direction::Long => "effS",
+                Direction::Neutral => "eff?",
+            };
+
+            if pressure >= cutoff {
+                info!(
+                    "[{}] pressure check HOLD age={:.2}h side={} pressure={:.2}% threshold={:.2}% cutoff={:.2}% signal={} strength={:.2} {}",
+                    symbol,
+                    age_h,
+                    monitored_side,
+                    pressure,
+                    threshold,
+                    cutoff,
+                    snapshot.signal,
+                    snapshot.strength,
+                    snapshot.reason
+                );
+                if let Some(tracked) = self.state.positions.get_mut(&symbol) {
+                    tracked.pressure_exit_last_check_ms = now_ms;
+                }
                 continue;
             }
 
-            let mut reasons = Vec::new();
-            if dead_opposes {
-                reasons.push(format!("dead_cap={}", signal.dead_cap.direction));
-            }
+            let exit_signal = signals.get(&symbol);
+            let reason = format!(
+                "PRESSURE_DECAY {:.2}% < {:.2}% ({}% of {:.2}%)",
+                pressure,
+                cutoff,
+                (PRESSURE_DECAY_THRESHOLD_RATIO * 100.0).round() as u64,
+                threshold
+            );
+            info!(
+                "[{}] pressure check EXIT age={:.2}h side={} pressure={:.2}% threshold={:.2}% cutoff={:.2}% signal={} strength={:.2} {}",
+                symbol,
+                age_h,
+                monitored_side,
+                pressure,
+                threshold,
+                cutoff,
+                snapshot.signal,
+                snapshot.strength,
+                snapshot.reason
+            );
 
-            match self
-                .exit_position(&position, &reasons.join(" "), Some(signal))
-                .await?
-            {
+            match self.exit_position(&position, &reason, exit_signal).await? {
                 ExitDisposition::Closed => {
                     self.state.positions.remove(&symbol);
-                    self.state
-                        .reentry_blocks
-                        .insert(symbol.clone(), position.direction);
+                    self.start_symbol_cooldown(&symbol, "PRESSURE_DECAY");
                 }
                 ExitDisposition::Detached => {
                     self.state.positions.remove(&symbol);
@@ -620,16 +790,20 @@ impl EvClawRuntime {
             .values()
             .filter(|signal| signal.target_direction.is_actionable())
             .count();
+        let now_ms = crate::now_ms();
+        let cooldown_blocked = signals
+            .values()
+            .filter(|signal| signal.target_direction.is_actionable())
+            .filter(|signal| !self.state.positions.contains_key(&signal.symbol))
+            .filter(|signal| self.is_symbol_cooldown_active(&signal.symbol, now_ms))
+            .count();
 
         let mut candidates = signals
             .values()
             .filter(|signal| signal.target_direction.is_actionable())
             .filter(|signal| !self.state.positions.contains_key(&signal.symbol))
             .filter(|signal| !active_acp_symbols.contains(&signal.symbol))
-            .filter(|signal| {
-                self.state.reentry_blocks.get(&signal.symbol).copied()
-                    != Some(signal.target_direction)
-            })
+            .filter(|signal| !self.is_symbol_cooldown_active(&signal.symbol, now_ms))
             .filter(|signal| self.executor.is_supported_symbol(&signal.symbol))
             .filter_map(|signal| {
                 snapshot
@@ -641,9 +815,10 @@ impl EvClawRuntime {
             .collect::<Vec<_>>();
 
         info!(
-            "[ENTRY] actionable_signals={} eligible_candidates={} occupied_slots={} available_slots={}",
+            "[ENTRY] actionable_signals={} eligible_candidates={} cooldown_blocked={} occupied_slots={} available_slots={}",
             actionable_total,
             candidates.len(),
+            cooldown_blocked,
             occupied_slots,
             available_slots
         );
@@ -675,6 +850,7 @@ impl EvClawRuntime {
             if meta.mark_px <= 0.0 {
                 continue;
             }
+            let bucket_policy = oi_bucket_policy(meta.oi_usd);
 
             let requested_qty = self
                 .executor
@@ -683,6 +859,18 @@ impl EvClawRuntime {
                 continue;
             }
             if self.cfg.dry_run {
+                if !self
+                    .passes_late_entry_guard(
+                        &signal.symbol,
+                        &signal.exchange_symbol,
+                        signal.target_direction,
+                        meta.mark_px,
+                        &bucket_policy,
+                    )
+                    .await?
+                {
+                    continue;
+                }
                 info!(
                     "[{}] DRY RUN: Would {} {:.6} @ {:.6} notional={:.2} {}",
                     signal.symbol,
@@ -713,6 +901,7 @@ impl EvClawRuntime {
         signal: CombinedSignal,
         requested_qty: f64,
     ) -> Result<EntryAttemptOutcome> {
+        let bucket_policy = oi_bucket_policy(meta.oi_usd);
         let acp_limit_price = if self.acp_executor.is_some() {
             Some(
                 self.build_acp_limit_price(
@@ -726,12 +915,25 @@ impl EvClawRuntime {
             None
         };
         let intended_entry_price = acp_limit_price.unwrap_or(meta.mark_px);
+        if !self
+            .passes_late_entry_guard(
+                &signal.symbol,
+                &signal.exchange_symbol,
+                signal.target_direction,
+                intended_entry_price,
+                &bucket_policy,
+            )
+            .await?
+        {
+            return Ok(EntryAttemptOutcome::Rejected);
+        }
         let (initial_stop, initial_tp) = self
             .build_exit_levels(
                 &signal.symbol,
                 &signal.exchange_symbol,
                 signal.target_direction,
                 intended_entry_price,
+                &bucket_policy,
             )
             .await?;
         if initial_stop <= 0.0 || initial_tp <= 0.0 {
@@ -851,6 +1053,7 @@ impl EvClawRuntime {
                 &signal.exchange_symbol,
                 signal.target_direction,
                 fill_price,
+                &bucket_policy,
             )
             .await?;
         let exit_side = opposite_direction(signal.target_direction);
@@ -904,12 +1107,11 @@ impl EvClawRuntime {
             if fill_size * take_profit_price >= self.cfg.tp_min_quote_usd {
                 let tp_result = self
                     .executor
-                    .place_stop_order(
+                    .place_reduce_only_limit_order(
                         &signal.symbol,
                         exit_side,
                         fill_size,
                         take_profit_price,
-                        "tp",
                     )
                     .await?;
                 if !tp_result.success {
@@ -941,11 +1143,13 @@ impl EvClawRuntime {
                 take_profit_price,
                 opened_at_ms: crate::now_ms(),
                 entry_signal: signal.clone(),
+                bucket_policy,
                 trade_id: Some(trade_id),
                 entry_source: "signal".to_string(),
                 acp_sltp_last_submit_ms,
                 acp_sltp_last_stop_price,
                 acp_sltp_last_take_profit_price,
+                pressure_exit_last_check_ms: 0,
             },
         );
         info!(
@@ -960,6 +1164,72 @@ impl EvClawRuntime {
             signal.reason
         );
         Ok(EntryAttemptOutcome::Entered)
+    }
+
+    async fn passes_late_entry_guard(
+        &self,
+        symbol: &str,
+        exchange_symbol: &str,
+        direction: Direction,
+        entry_price: f64,
+        bucket_policy: &OiBucketPolicy,
+    ) -> Result<bool> {
+        if !direction.is_actionable() || entry_price <= 0.0 {
+            return Ok(true);
+        }
+        let checkpoint_data = match self
+            .atr_client
+            .fetch_checkpoint_data(&self.info_client, exchange_symbol)
+            .await
+        {
+            Ok(data) => data,
+            Err(err) => {
+                warn!("[{}] late-entry guard skipped: {err:#}", symbol);
+                return Ok(true);
+            }
+        };
+        let Some(metrics) =
+            late_entry_guard_metrics(direction, entry_price, &checkpoint_data, bucket_policy)
+        else {
+            warn!(
+                "[{}] late-entry guard skipped: invalid checkpoint data",
+                symbol
+            );
+            return Ok(true);
+        };
+        let hit_4h = late_entry_guard_hit(metrics.extension_4h_atr, metrics.threshold_4h_atr);
+        let hit_8h = late_entry_guard_hit(metrics.extension_8h_atr, metrics.threshold_8h_atr);
+        let hit_12h = late_entry_guard_hit(metrics.extension_12h_atr, metrics.threshold_12h_atr);
+        if !hit_4h && !hit_8h && !hit_12h {
+            return Ok(true);
+        }
+
+        let mut hit_parts = Vec::with_capacity(3);
+        if hit_4h {
+            hit_parts.push("4h");
+        }
+        if hit_8h {
+            hit_parts.push("8h");
+        }
+        if hit_12h {
+            hit_parts.push("12h");
+        }
+        let hit_label = hit_parts.join(",");
+        info!(
+            "[{}] late-entry guard veto {} px={:.6} bucket={} ext4h={:.2}/{:.2} ext8h={:.2}/{:.2} ext12h={:.2}/{:.2} hit={}",
+            symbol,
+            direction,
+            entry_price,
+            bucket_policy.bucket_label,
+            metrics.extension_4h_atr,
+            metrics.threshold_4h_atr,
+            metrics.extension_8h_atr,
+            metrics.threshold_8h_atr,
+            metrics.extension_12h_atr,
+            metrics.threshold_12h_atr,
+            hit_label
+        );
+        Ok(false)
     }
 
     async fn exit_position(
@@ -984,26 +1254,57 @@ impl EvClawRuntime {
                 "[{}] exit rejected side={} qty={:.6} err={:?}",
                 position.symbol, close_side, position.qty, result.error
             );
+            let closed = self
+                .verify_flat_or_dust(&position.symbol, close_side, position.qty)
+                .await?;
+            if !closed {
+                if let Some(trade_id) = position.trade_id.or(self
+                    .journal
+                    .find_open_trade(&position.symbol)?
+                    .map(|trade| trade.id))
+                {
+                    self.journal.log_event(
+                        Some(trade_id),
+                        &position.symbol,
+                        "EXIT_RETRY",
+                        reason,
+                        exit_signal,
+                    )?;
+                }
+                return Ok(ExitDisposition::KeepTracking);
+            }
+
+            let mut exit_price = position.entry_price;
+            if result.filled_price > 0.0 {
+                exit_price = result.filled_price;
+            } else if self.acp_executor.is_none() {
+                let now_ms = crate::now_ms();
+                let recent_fills = self
+                    .info_client
+                    .fetch_user_fills(Some(now_ms.saturating_sub(DISAPPEARED_FILL_LOOKBACK_MS)))
+                    .await
+                    .unwrap_or_default();
+                if let Some(fill_price) =
+                    recent_disappearance_fill_price(position, &recent_fills, now_ms)
+                {
+                    exit_price = fill_price;
+                }
+            }
+
+            info!(
+                "[{}] EXIT {} qty={:.6} px={:.6} reason={} (after rejected close)",
+                position.symbol, close_side, position.qty, exit_price, reason
+            );
             if let Some(trade_id) = position.trade_id.or(self
                 .journal
                 .find_open_trade(&position.symbol)?
                 .map(|trade| trade.id))
             {
-                let _ = self.journal.close_trade(
-                    trade_id,
-                    position.entry_price,
-                    "EXIT_FAILED",
-                    exit_signal,
-                )?;
-                self.journal.log_event(
-                    Some(trade_id),
-                    &position.symbol,
-                    "EXIT_FAILED",
-                    reason,
-                    exit_signal,
-                )?;
+                let _ = self
+                    .journal
+                    .close_trade(trade_id, exit_price, reason, exit_signal)?;
             }
-            return Ok(ExitDisposition::Detached);
+            return Ok(ExitDisposition::Closed);
         }
         let closed = self
             .verify_flat_or_dust(&position.symbol, close_side, position.qty)
@@ -1128,6 +1429,7 @@ impl EvClawRuntime {
                             &position.exchange_symbol,
                             position.direction,
                             position.entry_price,
+                            &position.bucket_policy,
                         )
                         .await?;
                     if stop_price > 0.0 && take_profit_price > 0.0 {
@@ -1243,12 +1545,11 @@ impl EvClawRuntime {
                 }
                 let result = self
                     .executor
-                    .place_stop_order(
+                    .place_reduce_only_limit_order(
                         &position.symbol,
                         exit_side,
                         position.qty,
                         position.take_profit_price,
-                        "tp",
                     )
                     .await?;
                 if !result.success {
@@ -1272,6 +1573,7 @@ impl EvClawRuntime {
                 &position.exchange_symbol,
                 position.direction,
                 position.entry_price,
+                &position.bucket_policy,
             )
             .await?;
         if stop_price <= 0.0 || take_profit_price <= 0.0 {
@@ -1318,6 +1620,7 @@ impl EvClawRuntime {
         exchange_symbol: &str,
         direction: Direction,
         entry_price: f64,
+        bucket_policy: &OiBucketPolicy,
     ) -> Result<(f64, f64)> {
         if !direction.is_actionable() || entry_price <= 0.0 {
             return Ok((0.0, 0.0));
@@ -1328,8 +1631,8 @@ impl EvClawRuntime {
             .await
         {
             Ok(atr) if atr.atr > 0.0 => (
-                atr.atr * self.cfg.sl_atr_multiplier,
-                atr.atr * self.cfg.tp_atr_multiplier,
+                atr.atr * bucket_policy.sl_atr_multiplier,
+                atr.atr * bucket_policy.tp_atr_multiplier,
             ),
             Ok(_) => {
                 let fallback = entry_price * self.cfg.fallback_exit_pct;
@@ -1685,6 +1988,40 @@ fn opposite_direction(direction: Direction) -> Direction {
     }
 }
 
+fn monitored_pressure_pct(position: &TrackedPosition, snapshot: &DeadCapSnapshot) -> Option<f64> {
+    match position.direction {
+        Direction::Short => Some(snapshot.effective_long_pct),
+        Direction::Long => Some(snapshot.effective_short_pct),
+        Direction::Neutral => None,
+    }
+}
+
+fn pressure_exit_skips_coverage_low(snapshot: &DeadCapSnapshot) -> bool {
+    snapshot.reason.starts_with("coverage low")
+}
+
+fn pressure_exit_metrics(
+    position: &TrackedPosition,
+    snapshot: &DeadCapSnapshot,
+    threshold_ratio: f64,
+) -> Option<(f64, f64, f64)> {
+    if pressure_exit_skips_coverage_low(snapshot) {
+        return None;
+    }
+    let pressure = monitored_pressure_pct(position, snapshot)?;
+    let threshold = snapshot.threshold;
+    if !pressure.is_finite()
+        || threshold <= 0.0
+        || !threshold.is_finite()
+        || !threshold_ratio.is_finite()
+        || threshold_ratio <= 0.0
+    {
+        return None;
+    }
+    let cutoff = threshold * threshold_ratio;
+    Some((pressure, threshold, cutoff))
+}
+
 fn live_qty_epsilon(qty: f64) -> f64 {
     qty.abs().max(1.0) * 1e-6
 }
@@ -1842,10 +2179,12 @@ fn size_epsilon(qty: f64) -> f64 {
 fn classify_disappeared_position(
     position: &TrackedPosition,
     mark_price: Option<f64>,
+    recent_fill_price: Option<f64>,
     sl_atr_multiplier: f64,
     tp_atr_multiplier: f64,
 ) -> (f64, String) {
-    let exit_price = mark_price
+    let exit_price = recent_fill_price
+        .or(mark_price)
         .filter(|price| *price > 0.0)
         .unwrap_or(position.entry_price);
     if position.stop_price <= 0.0 || position.take_profit_price <= 0.0 || exit_price <= 0.0 {
@@ -1870,6 +2209,68 @@ fn classify_disappeared_position(
     }
 }
 
+fn recent_disappearance_fill_price(
+    position: &TrackedPosition,
+    recent_fills: &[UserFill],
+    now_ms: u64,
+) -> Option<f64> {
+    let close_side = opposite_direction(position.direction);
+    let window_start = now_ms.saturating_sub(DISAPPEARED_FILL_LOOKBACK_MS);
+
+    let mut candidates: Vec<&UserFill> = recent_fills
+        .iter()
+        .filter(|fill| fill.symbol == position.symbol)
+        .filter(|fill| fill.ts_ms >= window_start && fill.ts_ms <= now_ms)
+        .filter(|fill| fill.side == close_side)
+        .filter(|fill| fill_looks_like_close(fill, position.direction))
+        .collect();
+
+    if candidates.is_empty() {
+        candidates = recent_fills
+            .iter()
+            .filter(|fill| fill.symbol == position.symbol)
+            .filter(|fill| fill.ts_ms >= window_start && fill.ts_ms <= now_ms)
+            .filter(|fill| fill.side == close_side)
+            .collect();
+    }
+
+    let latest_ts = candidates.iter().map(|fill| fill.ts_ms).max()?;
+    let cluster_start = latest_ts.saturating_sub(DISAPPEARED_FILL_CLUSTER_MS);
+    let cluster = candidates
+        .into_iter()
+        .filter(|fill| fill.ts_ms >= cluster_start)
+        .collect::<Vec<_>>();
+    let total_size = cluster.iter().map(|fill| fill.size).sum::<f64>();
+    if total_size <= 0.0 {
+        return None;
+    }
+    Some(
+        cluster
+            .iter()
+            .map(|fill| fill.price * fill.size)
+            .sum::<f64>()
+            / total_size,
+    )
+}
+
+fn fill_looks_like_close(fill: &UserFill, position_direction: Direction) -> bool {
+    if fill.side != opposite_direction(position_direction) {
+        return false;
+    }
+    if let Some(dir_text) = fill.dir_text.as_deref() {
+        let normalized = dir_text.trim().to_ascii_lowercase();
+        if normalized.contains("close") {
+            return true;
+        }
+    }
+    if fill.closed_pnl.unwrap_or(0.0).abs() > 0.0 {
+        return true;
+    }
+    fill.start_position
+        .map(|start| start.abs() > 0.0)
+        .unwrap_or(false)
+}
+
 fn estimated_atr(
     position: &TrackedPosition,
     sl_atr_multiplier: f64,
@@ -1888,6 +2289,84 @@ fn estimated_atr(
     sl_component
         .max(tp_component)
         .max(position.entry_price.abs() * 0.001)
+}
+
+fn late_entry_guard_metrics(
+    direction: Direction,
+    entry_price: f64,
+    checkpoint_data: &AtrCheckpointData,
+    bucket_policy: &OiBucketPolicy,
+) -> Option<LateEntryGuardMetrics> {
+    if entry_price <= 0.0 || checkpoint_data.atr <= 0.0 {
+        return None;
+    }
+    let (anchor_4h, anchor_8h, anchor_12h) = match direction {
+        Direction::Long => (
+            checkpoint_data.low_4h_ago,
+            checkpoint_data.low_8h_ago,
+            checkpoint_data.low_12h_ago,
+        ),
+        Direction::Short => (
+            checkpoint_data.high_4h_ago,
+            checkpoint_data.high_8h_ago,
+            checkpoint_data.high_12h_ago,
+        ),
+        Direction::Neutral => return None,
+    };
+    if anchor_4h <= 0.0 || anchor_8h <= 0.0 || anchor_12h <= 0.0 {
+        return None;
+    }
+    let base_threshold = late_entry_guard_base_atr_multiplier(bucket_policy);
+    Some(LateEntryGuardMetrics {
+        extension_4h_atr: directional_entry_extension_atr(
+            direction,
+            entry_price,
+            anchor_4h,
+            checkpoint_data.atr,
+        ),
+        extension_8h_atr: directional_entry_extension_atr(
+            direction,
+            entry_price,
+            anchor_8h,
+            checkpoint_data.atr,
+        ),
+        extension_12h_atr: directional_entry_extension_atr(
+            direction,
+            entry_price,
+            anchor_12h,
+            checkpoint_data.atr,
+        ),
+        threshold_4h_atr: base_threshold,
+        threshold_8h_atr: base_threshold + LATE_ENTRY_GUARD_8H_ATR_SURCHARGE,
+        threshold_12h_atr: base_threshold + LATE_ENTRY_GUARD_12H_ATR_SURCHARGE,
+    })
+}
+
+fn late_entry_guard_base_atr_multiplier(bucket_policy: &OiBucketPolicy) -> f64 {
+    match bucket_policy.bucket_label.as_str() {
+        ">=1B" => 2.0,
+        ">=500M" => 2.25,
+        ">=100M" => 2.5,
+        ">=50M" => 2.75,
+        _ => 3.0,
+    }
+}
+
+fn directional_entry_extension_atr(
+    direction: Direction,
+    entry_price: f64,
+    anchor_price: f64,
+    atr: f64,
+) -> f64 {
+    match direction {
+        Direction::Long => (entry_price - anchor_price) / atr,
+        Direction::Short => (anchor_price - entry_price) / atr,
+        Direction::Neutral => 0.0,
+    }
+}
+
+fn late_entry_guard_hit(extension_atr: f64, threshold_atr: f64) -> bool {
+    extension_atr >= threshold_atr
 }
 
 fn neutral_signal_from_live(live: &LivePosition) -> CombinedSignal {
@@ -1940,44 +2419,33 @@ fn classify_sltp_orders(position: &TrackedPosition, orders: &[OpenOrder]) -> Cla
         sl_qty: 0.0,
         tp_qty: 0.0,
     };
-    let mut has_explicit_types = false;
     for order in orders {
         if !order.reduce_only {
             continue;
         }
         match order.order_type.as_str() {
             "sl" => {
-                has_explicit_types = true;
                 out.sl_qty += order.size;
                 out.sl_order_ids.insert(order.order_id.clone());
             }
             "tp" => {
-                has_explicit_types = true;
                 out.tp_qty += order.size;
                 out.tp_order_ids.insert(order.order_id.clone());
             }
-            _ => {}
-        }
-    }
-    if has_explicit_types {
-        return out;
-    }
-
-    for order in orders {
-        if !order.reduce_only {
-            continue;
-        }
-        let is_stop = match position.direction {
-            Direction::Long => order.price <= position.entry_price,
-            Direction::Short => order.price >= position.entry_price,
-            Direction::Neutral => false,
-        };
-        if is_stop {
-            out.sl_qty += order.size;
-            out.sl_order_ids.insert(order.order_id.clone());
-        } else {
-            out.tp_qty += order.size;
-            out.tp_order_ids.insert(order.order_id.clone());
+            _ => {
+                let is_stop = match position.direction {
+                    Direction::Long => order.price <= position.entry_price,
+                    Direction::Short => order.price >= position.entry_price,
+                    Direction::Neutral => false,
+                };
+                if is_stop {
+                    out.sl_qty += order.size;
+                    out.sl_order_ids.insert(order.order_id.clone());
+                } else {
+                    out.tp_qty += order.size;
+                    out.tp_order_ids.insert(order.order_id.clone());
+                }
+            }
         }
     }
     out
@@ -1992,12 +2460,15 @@ pub fn combined_target(
     _whale: &SignalComponent,
     base_notional_usd: f64,
     min_trade_notional_usd: f64,
+    bucket_policy: &OiBucketPolicy,
 ) -> (f64, Direction, f64, f64) {
+    let scaled_base_notional_usd = base_notional_usd * bucket_policy.size_multiplier;
+    let scaled_min_trade_notional_usd = min_trade_notional_usd * bucket_policy.size_multiplier;
     let net_score = dead_cap.direction.sign() * dead_cap.strength;
     let target_direction = Direction::from_score(net_score);
-    let raw_notional_usd = base_notional_usd * net_score.abs();
+    let raw_notional_usd = scaled_base_notional_usd * net_score.abs();
     let order_notional_usd = if target_direction.is_actionable() {
-        raw_notional_usd.max(min_trade_notional_usd)
+        raw_notional_usd.max(scaled_min_trade_notional_usd)
     } else {
         0.0
     };
@@ -2009,6 +2480,97 @@ pub fn combined_target(
     )
 }
 
+fn oi_bucket_policy(oi_usd: f64) -> OiBucketPolicy {
+    if oi_usd >= 1_000_000_000.0 {
+        OiBucketPolicy {
+            bucket_label: ">=1B".to_string(),
+            oi_usd_at_entry: oi_usd,
+            size_multiplier: 3.0,
+            sl_atr_multiplier: 2.0,
+            tp_atr_multiplier: 3.0,
+            min_hold_hours: 2.0,
+        }
+    } else if oi_usd >= 500_000_000.0 {
+        OiBucketPolicy {
+            bucket_label: ">=500M".to_string(),
+            oi_usd_at_entry: oi_usd,
+            size_multiplier: 2.5,
+            sl_atr_multiplier: 2.25,
+            tp_atr_multiplier: 3.5,
+            min_hold_hours: 2.0,
+        }
+    } else if oi_usd >= 100_000_000.0 {
+        OiBucketPolicy {
+            bucket_label: ">=100M".to_string(),
+            oi_usd_at_entry: oi_usd,
+            size_multiplier: 2.0,
+            sl_atr_multiplier: 2.5,
+            tp_atr_multiplier: 4.0,
+            min_hold_hours: 3.0,
+        }
+    } else if oi_usd >= 50_000_000.0 {
+        OiBucketPolicy {
+            bucket_label: ">=50M".to_string(),
+            oi_usd_at_entry: oi_usd,
+            size_multiplier: 1.5,
+            sl_atr_multiplier: 2.75,
+            tp_atr_multiplier: 4.25,
+            min_hold_hours: 3.0,
+        }
+    } else if oi_usd >= 40_000_000.0 {
+        OiBucketPolicy {
+            bucket_label: ">=40M".to_string(),
+            oi_usd_at_entry: oi_usd,
+            size_multiplier: 1.0,
+            sl_atr_multiplier: 3.0,
+            tp_atr_multiplier: 4.75,
+            min_hold_hours: 3.0,
+        }
+    } else if oi_usd >= 25_000_000.0 {
+        OiBucketPolicy {
+            bucket_label: ">=25M".to_string(),
+            oi_usd_at_entry: oi_usd,
+            size_multiplier: 0.8,
+            sl_atr_multiplier: 3.25,
+            tp_atr_multiplier: 5.0,
+            min_hold_hours: 4.0,
+        }
+    } else if oi_usd >= 10_000_000.0 {
+        OiBucketPolicy {
+            bucket_label: ">=10M".to_string(),
+            oi_usd_at_entry: oi_usd,
+            size_multiplier: 0.6,
+            sl_atr_multiplier: 3.5,
+            tp_atr_multiplier: 6.0,
+            min_hold_hours: 5.0,
+        }
+    } else {
+        OiBucketPolicy {
+            bucket_label: ">=1M".to_string(),
+            oi_usd_at_entry: oi_usd,
+            size_multiplier: 0.3,
+            sl_atr_multiplier: 3.75,
+            tp_atr_multiplier: 7.0,
+            min_hold_hours: 6.0,
+        }
+    }
+}
+
+fn should_refresh_bucket_policy(bucket_policy: &OiBucketPolicy) -> bool {
+    bucket_policy.bucket_label == "legacy" || !bucket_policy.is_initialized()
+}
+
+fn resolved_bucket_policy(
+    current_policy: &OiBucketPolicy,
+    fallback_policy: &OiBucketPolicy,
+) -> OiBucketPolicy {
+    if should_refresh_bucket_policy(current_policy) {
+        fallback_policy.clone()
+    } else {
+        current_policy.clone()
+    }
+}
+
 pub fn should_release_reentry_block(
     blocked_direction: Direction,
     target_direction: Direction,
@@ -2016,10 +2578,22 @@ pub fn should_release_reentry_block(
     target_direction == Direction::Neutral || target_direction.opposes(blocked_direction)
 }
 
+fn should_start_symbol_cooldown(exit_reason: &str) -> bool {
+    matches!(exit_reason, "LIKELY_SL" | "LIKELY_TP" | "EXTERNAL_CLOSE")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{infer_sltp_presence, should_submit_acp_sltp};
-    use crate::types::{CombinedSignal, Direction, OpenOrder, SignalComponent, TrackedPosition};
+    use super::{
+        classify_disappeared_position, combined_target, infer_sltp_presence,
+        late_entry_guard_base_atr_multiplier, late_entry_guard_hit, late_entry_guard_metrics,
+        oi_bucket_policy, pressure_exit_metrics, recent_disappearance_fill_price,
+        should_start_symbol_cooldown, should_submit_acp_sltp,
+    };
+    use crate::types::{
+        AtrCheckpointData, CombinedSignal, DeadCapSnapshot, Direction, OiBucketPolicy, OpenOrder,
+        SignalComponent, TrackedPosition, UserFill,
+    };
 
     #[test]
     fn infer_sltp_presence_from_reduce_only_prices_for_short() {
@@ -2044,11 +2618,13 @@ mod tests {
                 order_notional_usd: 15.0,
                 reason: String::new(),
             },
+            bucket_policy: OiBucketPolicy::default(),
             trade_id: None,
             entry_source: "signal".to_string(),
             acp_sltp_last_submit_ms: 0,
             acp_sltp_last_stop_price: 0.0,
             acp_sltp_last_take_profit_price: 0.0,
+            pressure_exit_last_check_ms: 0,
         };
         let orders = vec![
             OpenOrder {
@@ -2066,6 +2642,58 @@ mod tests {
                 price: 8.34,
                 size: 1.6,
                 symbol: "LINK".to_string(),
+            },
+        ];
+        assert_eq!(infer_sltp_presence(&position, &orders), (true, true));
+    }
+
+    #[test]
+    fn infer_sltp_presence_with_explicit_sl_and_reduce_only_tp_limit() {
+        let position = TrackedPosition {
+            symbol: "BTC".to_string(),
+            exchange_symbol: "BTC".to_string(),
+            direction: Direction::Long,
+            qty: 0.5,
+            entry_price: 100.0,
+            entry_notional_usd: 50.0,
+            stop_price: 95.0,
+            take_profit_price: 110.0,
+            opened_at_ms: 0,
+            entry_signal: CombinedSignal {
+                symbol: "BTC".to_string(),
+                exchange_symbol: "BTC".to_string(),
+                dead_cap: SignalComponent::neutral(""),
+                whale: SignalComponent::neutral(""),
+                net_score: 0.5,
+                target_direction: Direction::Long,
+                raw_notional_usd: 15.0,
+                order_notional_usd: 15.0,
+                reason: String::new(),
+            },
+            bucket_policy: OiBucketPolicy::default(),
+            trade_id: None,
+            entry_source: "signal".to_string(),
+            acp_sltp_last_submit_ms: 0,
+            acp_sltp_last_stop_price: 0.0,
+            acp_sltp_last_take_profit_price: 0.0,
+            pressure_exit_last_check_ms: 0,
+        };
+        let orders = vec![
+            OpenOrder {
+                order_id: "sl".to_string(),
+                order_type: "sl".to_string(),
+                reduce_only: true,
+                price: 95.0,
+                size: 0.5,
+                symbol: "BTC".to_string(),
+            },
+            OpenOrder {
+                order_id: "tp-limit".to_string(),
+                order_type: "unknown_reduce_only".to_string(),
+                reduce_only: true,
+                price: 110.0,
+                size: 0.5,
+                symbol: "BTC".to_string(),
             },
         ];
         assert_eq!(infer_sltp_presence(&position, &orders), (true, true));
@@ -2094,11 +2722,13 @@ mod tests {
                 order_notional_usd: 15.0,
                 reason: String::new(),
             },
+            bucket_policy: OiBucketPolicy::default(),
             trade_id: None,
             entry_source: "signal".to_string(),
             acp_sltp_last_submit_ms: 1_000,
             acp_sltp_last_stop_price: 95.0,
             acp_sltp_last_take_profit_price: 110.0,
+            pressure_exit_last_check_ms: 0,
         };
 
         assert!(!should_submit_acp_sltp(
@@ -2132,6 +2762,351 @@ mod tests {
             17_000,
             15_000,
             60_000,
+        ));
+    }
+
+    #[test]
+    fn symbol_cooldown_applies_only_to_tp_and_sl_disappearances() {
+        assert!(should_start_symbol_cooldown("LIKELY_TP"));
+        assert!(should_start_symbol_cooldown("LIKELY_SL"));
+        assert!(should_start_symbol_cooldown("EXTERNAL_CLOSE"));
+        assert!(!should_start_symbol_cooldown("dead_cap=LONG"));
+    }
+
+    #[test]
+    fn oi_bucket_policy_thresholds_match_live_schedule() {
+        let p = oi_bucket_policy(1_100_000_000.0);
+        assert_eq!(p.bucket_label, ">=1B");
+        assert_eq!(p.size_multiplier, 3.0);
+        assert_eq!(p.sl_atr_multiplier, 2.0);
+        assert_eq!(p.tp_atr_multiplier, 3.0);
+        assert_eq!(p.min_hold_hours, 2.0);
+
+        let p = oi_bucket_policy(600_000_000.0);
+        assert_eq!(p.bucket_label, ">=500M");
+        assert_eq!(p.size_multiplier, 2.5);
+
+        let p = oi_bucket_policy(150_000_000.0);
+        assert_eq!(p.bucket_label, ">=100M");
+        assert_eq!(p.size_multiplier, 2.0);
+        assert_eq!(p.min_hold_hours, 3.0);
+
+        let p = oi_bucket_policy(60_000_000.0);
+        assert_eq!(p.bucket_label, ">=50M");
+        assert_eq!(p.size_multiplier, 1.5);
+        assert_eq!(p.min_hold_hours, 3.0);
+
+        let p = oi_bucket_policy(45_000_000.0);
+        assert_eq!(p.bucket_label, ">=40M");
+        assert_eq!(p.size_multiplier, 1.0);
+        assert_eq!(p.min_hold_hours, 3.0);
+
+        let p = oi_bucket_policy(30_000_000.0);
+        assert_eq!(p.bucket_label, ">=25M");
+        assert_eq!(p.size_multiplier, 0.8);
+        assert_eq!(p.min_hold_hours, 4.0);
+
+        let p = oi_bucket_policy(15_000_000.0);
+        assert_eq!(p.bucket_label, ">=10M");
+        assert_eq!(p.size_multiplier, 0.6);
+        assert_eq!(p.min_hold_hours, 5.0);
+
+        let p = oi_bucket_policy(5_000_000.0);
+        assert_eq!(p.bucket_label, ">=1M");
+        assert_eq!(p.size_multiplier, 0.3);
+        assert_eq!(p.sl_atr_multiplier, 3.75);
+        assert_eq!(p.tp_atr_multiplier, 7.0);
+        assert_eq!(p.min_hold_hours, 6.0);
+    }
+
+    #[test]
+    fn combined_target_uses_bucket_size_multiplier() {
+        let dead_cap = SignalComponent {
+            direction: Direction::Long,
+            strength: 0.8,
+            reason: String::new(),
+        };
+        let whale = SignalComponent::neutral("");
+        let bucket_policy = oi_bucket_policy(1_200_000_000.0);
+        let (_, target_direction, raw_notional_usd, order_notional_usd) =
+            combined_target(&dead_cap, &whale, 500.0, 150.0, &bucket_policy);
+        assert_eq!(target_direction, Direction::Long);
+        assert!((raw_notional_usd - 1_200.0).abs() < 1e-9);
+        assert!((order_notional_usd - 1_200.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recent_close_fill_reclassifies_disappearance_as_tp() {
+        let position = TrackedPosition {
+            symbol: "BTC".to_string(),
+            exchange_symbol: "BTC".to_string(),
+            direction: Direction::Long,
+            qty: 1.0,
+            entry_price: 100.0,
+            entry_notional_usd: 100.0,
+            stop_price: 95.0,
+            take_profit_price: 110.0,
+            opened_at_ms: 0,
+            entry_signal: CombinedSignal {
+                symbol: "BTC".to_string(),
+                exchange_symbol: "BTC".to_string(),
+                dead_cap: SignalComponent::neutral(""),
+                whale: SignalComponent::neutral(""),
+                net_score: 0.5,
+                target_direction: Direction::Long,
+                raw_notional_usd: 15.0,
+                order_notional_usd: 15.0,
+                reason: String::new(),
+            },
+            bucket_policy: OiBucketPolicy::default(),
+            trade_id: None,
+            entry_source: "signal".to_string(),
+            acp_sltp_last_submit_ms: 0,
+            acp_sltp_last_stop_price: 0.0,
+            acp_sltp_last_take_profit_price: 0.0,
+            pressure_exit_last_check_ms: 0,
+        };
+        let now_ms = 1_000_000;
+        let fills = vec![UserFill {
+            fill_id: "tid:1".to_string(),
+            symbol: "BTC".to_string(),
+            exchange_symbol: "BTC".to_string(),
+            side: Direction::Short,
+            dir_text: Some("Close Long".to_string()),
+            price: 110.0,
+            size: 1.0,
+            ts_ms: now_ms - 1_000,
+            oid: Some(1),
+            tid: Some(1),
+            start_position: Some(1.0),
+            closed_pnl: Some(10.0),
+            fee_usd: Some(0.1),
+            builder_fee_usd: None,
+            crossed: true,
+            twap: false,
+        }];
+
+        let recent_fill_price = recent_disappearance_fill_price(&position, &fills, now_ms);
+        let (exit_price, exit_reason) =
+            classify_disappeared_position(&position, None, recent_fill_price, 1.5, 1.0);
+
+        assert_eq!(recent_fill_price, Some(110.0));
+        assert_eq!(exit_reason, "LIKELY_TP");
+        assert_eq!(exit_price, 110.0);
+    }
+
+    #[test]
+    fn pressure_exit_uses_directional_effective_pressure() {
+        let position = TrackedPosition {
+            symbol: "ETH".to_string(),
+            exchange_symbol: "ETH".to_string(),
+            direction: Direction::Short,
+            qty: 1.0,
+            entry_price: 100.0,
+            entry_notional_usd: 100.0,
+            stop_price: 105.0,
+            take_profit_price: 95.0,
+            opened_at_ms: 0,
+            entry_signal: CombinedSignal {
+                symbol: "ETH".to_string(),
+                exchange_symbol: "ETH".to_string(),
+                dead_cap: SignalComponent::neutral(""),
+                whale: SignalComponent::neutral(""),
+                net_score: -0.5,
+                target_direction: Direction::Short,
+                raw_notional_usd: 15.0,
+                order_notional_usd: 15.0,
+                reason: String::new(),
+            },
+            bucket_policy: OiBucketPolicy::default(),
+            trade_id: None,
+            entry_source: "signal".to_string(),
+            acp_sltp_last_submit_ms: 0,
+            acp_sltp_last_stop_price: 0.0,
+            acp_sltp_last_take_profit_price: 0.0,
+            pressure_exit_last_check_ms: 0,
+        };
+        let snapshot = DeadCapSnapshot {
+            symbol: "ETH".to_string(),
+            signal: Direction::Neutral,
+            strength: 0.0,
+            threshold: 6.0,
+            locked_long_pct: 0.0,
+            locked_short_pct: 0.0,
+            effective_long_pct: 4.2,
+            effective_short_pct: 1.0,
+            bad_long_pct: 0.0,
+            bad_short_pct: 0.0,
+            smart_long_pct: 0.0,
+            smart_short_pct: 0.0,
+            observed_pct: 90.0,
+            locked_wallet_count: 10,
+            dominant_top_share: 50.0,
+            persistence_streak: 0,
+            reason: "test".to_string(),
+        };
+
+        let metrics = pressure_exit_metrics(&position, &snapshot, 0.8).expect("metrics");
+        assert!((metrics.0 - 4.2).abs() < 1e-9);
+        assert!((metrics.1 - 6.0).abs() < 1e-9);
+        assert!((metrics.2 - 4.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pressure_exit_rejects_coverage_low_snapshot() {
+        let position = TrackedPosition {
+            symbol: "TRX".to_string(),
+            exchange_symbol: "TRX".to_string(),
+            direction: Direction::Short,
+            qty: 10.0,
+            entry_price: 1.0,
+            entry_notional_usd: 10.0,
+            stop_price: 1.1,
+            take_profit_price: 0.9,
+            opened_at_ms: 0,
+            entry_signal: CombinedSignal {
+                symbol: "TRX".to_string(),
+                exchange_symbol: "TRX".to_string(),
+                dead_cap: SignalComponent::neutral(""),
+                whale: SignalComponent::neutral(""),
+                net_score: -0.5,
+                target_direction: Direction::Short,
+                raw_notional_usd: 10.0,
+                order_notional_usd: 10.0,
+                reason: String::new(),
+            },
+            bucket_policy: OiBucketPolicy::default(),
+            trade_id: None,
+            entry_source: "signal".to_string(),
+            acp_sltp_last_submit_ms: 0,
+            acp_sltp_last_stop_price: 0.0,
+            acp_sltp_last_take_profit_price: 0.0,
+            pressure_exit_last_check_ms: 0,
+        };
+        let snapshot = DeadCapSnapshot {
+            symbol: "TRX".to_string(),
+            signal: Direction::Neutral,
+            strength: 0.0,
+            threshold: 12.0,
+            locked_long_pct: 0.0,
+            locked_short_pct: 0.0,
+            effective_long_pct: 0.0,
+            effective_short_pct: 0.0,
+            bad_long_pct: 0.0,
+            bad_short_pct: 0.0,
+            smart_long_pct: 0.0,
+            smart_short_pct: 0.0,
+            observed_pct: 0.0,
+            locked_wallet_count: 0,
+            dominant_top_share: 0.0,
+            persistence_streak: 0,
+            reason: "coverage low".to_string(),
+        };
+
+        assert!(pressure_exit_metrics(&position, &snapshot, 0.8).is_none());
+    }
+
+    #[test]
+    fn late_entry_guard_uses_bucket_base_schedule() {
+        let major = oi_bucket_policy(1_100_000_000.0);
+        assert!((late_entry_guard_base_atr_multiplier(&major) - 2.0).abs() < 1e-9);
+
+        let mid = oi_bucket_policy(600_000_000.0);
+        assert!((late_entry_guard_base_atr_multiplier(&mid) - 2.25).abs() < 1e-9);
+
+        let small = oi_bucket_policy(15_000_000.0);
+        assert!((late_entry_guard_base_atr_multiplier(&small) - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn late_entry_guard_allows_subthreshold_directional_short_extension() {
+        let bucket = oi_bucket_policy(15_000_000.0);
+        let checkpoint_data = AtrCheckpointData {
+            atr: 1.0,
+            high_4h_ago: 102.5,
+            low_4h_ago: 98.5,
+            high_8h_ago: 104.0,
+            low_8h_ago: 97.5,
+            high_12h_ago: 105.0,
+            low_12h_ago: 96.5,
+        };
+        let metrics = late_entry_guard_metrics(Direction::Short, 100.0, &checkpoint_data, &bucket)
+            .expect("metrics");
+        assert!((metrics.threshold_4h_atr - 3.0).abs() < 1e-9);
+        assert!((metrics.threshold_8h_atr - 5.0).abs() < 1e-9);
+        assert!((metrics.threshold_12h_atr - 6.0).abs() < 1e-9);
+        assert!((metrics.extension_4h_atr - 2.5).abs() < 1e-9);
+        assert!(!late_entry_guard_hit(
+            metrics.extension_4h_atr,
+            metrics.threshold_4h_atr
+        ));
+        assert!(!late_entry_guard_hit(
+            metrics.extension_8h_atr,
+            metrics.threshold_8h_atr
+        ));
+        assert!(!late_entry_guard_hit(
+            metrics.extension_12h_atr,
+            metrics.threshold_12h_atr
+        ));
+    }
+
+    #[test]
+    fn late_entry_guard_blocks_short_on_four_hour_high_extension() {
+        let bucket = oi_bucket_policy(600_000_000.0);
+        let checkpoint_data = AtrCheckpointData {
+            atr: 1.0,
+            high_4h_ago: 103.0,
+            low_4h_ago: 98.0,
+            high_8h_ago: 103.8,
+            low_8h_ago: 97.0,
+            high_12h_ago: 104.5,
+            low_12h_ago: 96.0,
+        };
+        let metrics = late_entry_guard_metrics(Direction::Short, 100.0, &checkpoint_data, &bucket)
+            .expect("metrics");
+        assert!((metrics.threshold_4h_atr - 2.25).abs() < 1e-9);
+        assert!((metrics.threshold_8h_atr - 4.25).abs() < 1e-9);
+        assert!((metrics.threshold_12h_atr - 5.25).abs() < 1e-9);
+        assert!(late_entry_guard_hit(
+            metrics.extension_4h_atr,
+            metrics.threshold_4h_atr
+        ));
+        assert!(!late_entry_guard_hit(
+            metrics.extension_8h_atr,
+            metrics.threshold_8h_atr
+        ));
+        assert!(!late_entry_guard_hit(
+            metrics.extension_12h_atr,
+            metrics.threshold_12h_atr
+        ));
+    }
+
+    #[test]
+    fn late_entry_guard_blocks_long_on_directional_low_extension() {
+        let bucket = oi_bucket_policy(1_200_000_000.0);
+        let checkpoint_data = AtrCheckpointData {
+            atr: 1.0,
+            high_4h_ago: 101.0,
+            low_4h_ago: 97.5,
+            high_8h_ago: 102.0,
+            low_8h_ago: 95.8,
+            high_12h_ago: 103.0,
+            low_12h_ago: 94.8,
+        };
+        let metrics = late_entry_guard_metrics(Direction::Long, 100.0, &checkpoint_data, &bucket)
+            .expect("metrics");
+        assert!((metrics.threshold_4h_atr - 2.0).abs() < 1e-9);
+        assert!(late_entry_guard_hit(
+            metrics.extension_4h_atr,
+            metrics.threshold_4h_atr
+        ));
+        assert!(late_entry_guard_hit(
+            metrics.extension_8h_atr,
+            metrics.threshold_8h_atr
+        ));
+        assert!(late_entry_guard_hit(
+            metrics.extension_12h_atr,
+            metrics.threshold_12h_atr
         ));
     }
 }
