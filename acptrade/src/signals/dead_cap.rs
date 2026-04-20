@@ -44,14 +44,15 @@ pub struct DeadCapitalSignal {
 }
 
 impl DeadCapitalSignal {
-    const MIN_OI: f64 = 10_000_000.0;
+    const MIN_OI: f64 = 1_000_000.0;
     const MIN_TRIGGER_STRENGTH: f64 = 0.75;
-    const THRESHOLD_HARDENING_MULTIPLIER: f64 = 2.5;
+    const MAX_OPPOSING_PRESSURE_RATIO: f64 = 0.75;
+    const THRESHOLD_HARDENING_MULTIPLIER: f64 = 1.0;
     const THRESHOLDS: &'static [(f64, f64)] = &[
-        (1_000_000_000.0, 2.5),
-        (500_000_000.0, 4.0),
-        (100_000_000.0, 6.0),
-        (10_000_000.0, 6.0),
+        (1_000_000_000.0, 4.0),
+        (500_000_000.0, 6.0),
+        (100_000_000.0, 9.0),
+        (10_000_000.0, 12.0),
     ];
 
     pub fn evaluate(
@@ -86,7 +87,7 @@ impl DeadCapitalSignal {
                 locked_wallet_count: 0,
                 dominant_top_share: 0.0,
                 persistence_streak: 0,
-                reason: format!("OI < $10M (${:.2}M)", oi_usd / 1_000_000.0),
+                reason: format!("OI < $1M (${:.2}M)", oi_usd / 1_000_000.0),
             };
         }
 
@@ -220,6 +221,11 @@ impl DeadCapitalSignal {
             Direction::Long => locked_short_count,
             Direction::Neutral => 0,
         };
+        let opposing_pct = match dominant_side {
+            Direction::Short => effective_short_pct,
+            Direction::Long => effective_long_pct,
+            Direction::Neutral => 0.0,
+        };
         let dominant_top_share = match dominant_side {
             Direction::Short => top_share(&weighted_long_contribs),
             Direction::Long => top_share(&weighted_short_contribs),
@@ -248,6 +254,35 @@ impl DeadCapitalSignal {
                     "breadth low count:{} < min:{}",
                     dominant_count,
                     min_breadth_wallets(oi_usd)
+                ),
+            );
+        }
+
+        let opposing_max_pct = threshold * Self::MAX_OPPOSING_PRESSURE_RATIO;
+        if dominant_side.is_actionable()
+            && dominant_pct >= threshold
+            && opposing_pct >= opposing_max_pct
+        {
+            self.reset(symbol);
+            return self.neutral_evaluation(
+                oi_usd,
+                threshold,
+                locked_long,
+                locked_short,
+                bad_long,
+                bad_short,
+                smart_long,
+                smart_short,
+                effective_long,
+                effective_short,
+                locked_long_count,
+                locked_short_count,
+                locked_wallet_count,
+                observed_pct,
+                dominant_top_share,
+                format!(
+                    "opposing high effL:{:.1}% effS:{:.1}% opp:{:.1}% >= max:{:.1}%",
+                    effective_long_pct, effective_short_pct, opposing_pct, opposing_max_pct
                 ),
             );
         }
@@ -648,4 +683,86 @@ mod tests {
         let _ = fs::remove_file(wallet_file);
     }
 
+    #[test]
+    fn dead_cap_blocks_entry_when_opposing_pressure_too_high() {
+        let wallet_file = PathBuf::from("/tmp/evclaw_dead_cap_wallets_opposing.json");
+        fs::write(
+            &wallet_file,
+            r#"{
+                "0x1":{"label":"REKT","score":-80,"volume_weight":1.0},
+                "0x2":{"label":"REKT","score":-80,"volume_weight":1.0},
+                "0x3":{"label":"REKT","score":-80,"volume_weight":1.0},
+                "0x4":{"label":"REKT","score":-80,"volume_weight":1.0}
+            }"#,
+        )
+        .unwrap();
+        let mut labels = WalletLabelStore::new(wallet_file.clone());
+        labels.reload().unwrap();
+
+        let mut signal = DeadCapitalSignal::default();
+        let positions = vec![
+            WalletPosition {
+                wallet: "0x1".to_string(),
+                symbol: "BTC".to_string(),
+                side: Direction::Long,
+                position_value: 9_000_000.0,
+                entry_price: 100_000.0,
+                unrealized_pnl: -500_000.0,
+                margin_used: 3_000_000.0,
+                leverage: 3.0,
+                funding_since_open: 30.0,
+            },
+            WalletPosition {
+                wallet: "0x2".to_string(),
+                symbol: "BTC".to_string(),
+                side: Direction::Long,
+                position_value: 9_000_000.0,
+                entry_price: 100_000.0,
+                unrealized_pnl: -450_000.0,
+                margin_used: 2_500_000.0,
+                leverage: 3.0,
+                funding_since_open: 20.0,
+            },
+            WalletPosition {
+                wallet: "0x3".to_string(),
+                symbol: "BTC".to_string(),
+                side: Direction::Short,
+                position_value: 8_000_000.0,
+                entry_price: 100_000.0,
+                unrealized_pnl: -350_000.0,
+                margin_used: 2_000_000.0,
+                leverage: 3.0,
+                funding_since_open: 10.0,
+            },
+            WalletPosition {
+                wallet: "0x4".to_string(),
+                symbol: "BTC".to_string(),
+                side: Direction::Short,
+                position_value: 8_000_000.0,
+                entry_price: 100_000.0,
+                unrealized_pnl: -300_000.0,
+                margin_used: 2_000_000.0,
+                leverage: 3.0,
+                funding_since_open: 5.0,
+            },
+        ];
+        let mut accounts = HashMap::new();
+        for wallet in ["0x1", "0x2", "0x3", "0x4"] {
+            accounts.insert(
+                wallet.to_string(),
+                AccountSummary {
+                    wallet: wallet.to_string(),
+                    account_value: 1.0,
+                    margin_used: 1.0,
+                    available_margin: 0.0,
+                    is_locked: true,
+                },
+            );
+        }
+
+        let evaluation = signal.evaluate("BTC", &positions, &accounts, 100_000_000.0, &labels);
+        assert_eq!(evaluation.signal, Direction::Neutral);
+        assert!(evaluation.reason.contains("opposing high"));
+        let _ = fs::remove_file(wallet_file);
+    }
 }

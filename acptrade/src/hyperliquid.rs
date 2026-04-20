@@ -667,6 +667,54 @@ impl ExecutionClient {
         Ok(out)
     }
 
+    pub async fn fetch_user_fills(&self, since_ms: Option<u64>) -> Result<Vec<UserFill>> {
+        let Some(user) = self.trading_address.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let raw = if let Some(start_time) = since_ms {
+            let by_time_payload = json!({
+                "type": "userFillsByTime",
+                "user": user,
+                "startTime": start_time,
+                "endTime": crate::now_ms(),
+                "aggregateByTime": false,
+            });
+            match self
+                .public_http
+                .post_json(&self.public_info_url, &by_time_payload)
+                .await
+            {
+                Ok(value) => value,
+                Err(by_time_err) => {
+                    debug!("userFillsByTime failed, falling back to userFills: {by_time_err}");
+                    self.public_http
+                        .post_json(
+                            &self.public_info_url,
+                            &json!({
+                                "type": "userFills",
+                                "user": user,
+                                "startTime": start_time,
+                            }),
+                        )
+                        .await?
+                }
+            }
+        } else {
+            self.public_http
+                .post_json(
+                    &self.public_info_url,
+                    &json!({
+                        "type": "userFills",
+                        "user": user,
+                    }),
+                )
+                .await?
+        };
+        Ok(parse_user_fills_array(
+            raw.as_array().map(|arr| arr.as_slice()).unwrap_or(&[]),
+        ))
+    }
+
     pub async fn cancel_all_limit_orders(&mut self, symbol: Option<&str>) -> Result<usize> {
         let orders = self.get_open_orders(symbol).await?;
         let mut cancelled = 0usize;
@@ -838,6 +886,55 @@ impl ExecutionClient {
         };
 
         self.parse_order_response(symbol, response, normalized_trigger_px, size)
+    }
+
+    pub async fn place_reduce_only_limit_order(
+        &mut self,
+        symbol: &str,
+        side: Direction,
+        size: f64,
+        limit_price: f64,
+    ) -> Result<OrderResult> {
+        if size <= 0.0 || limit_price <= 0.0 {
+            return Ok(OrderResult {
+                success: false,
+                order_id: None,
+                filled_size: 0.0,
+                filled_price: 0.0,
+                error: Some("invalid size/price".to_string()),
+            });
+        }
+        if self.dry_run {
+            info!(
+                "[DRY] reduce-only limit {} size={:.6} symbol={} px={:.6}",
+                side, size, symbol, limit_price
+            );
+            return Ok(OrderResult {
+                success: true,
+                order_id: Some(format!("dry-ro-limit-{}", crate::now_ms())),
+                filled_size: 0.0,
+                filled_price: limit_price,
+                error: None,
+            });
+        }
+
+        let rounded_price = self.round_price(limit_price, symbol);
+        let max_price_decimals = self.max_price_decimals(symbol);
+        let normalized_limit_px = normalized_limit_price(rounded_price, max_price_decimals)
+            .ok_or_else(|| anyhow!("failed to normalize limit price for {}", symbol))?;
+        let rounded_size = self.round_size(size, symbol);
+        if rounded_size <= 0.0 {
+            return Ok(OrderResult {
+                success: false,
+                order_id: None,
+                filled_size: 0.0,
+                filled_price: 0.0,
+                error: Some("size rounded to zero".to_string()),
+            });
+        }
+
+        self.submit_limit_order(symbol, side, rounded_size, normalized_limit_px, true)
+            .await
     }
 
     pub async fn place_market_order(
@@ -2208,11 +2305,17 @@ fn parse_user_fills_array(items: &[Value]) -> Vec<UserFill> {
                         .map(direction_from_fill_dir)
                 })
                 .unwrap_or(Direction::Neutral),
+            dir_text: item
+                .get("dir")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string()),
             price,
             size,
             ts_ms,
             oid,
             tid,
+            start_position: item.get("startPosition").and_then(value_as_f64),
+            closed_pnl: item.get("closedPnl").and_then(value_as_f64),
             fee_usd: item.get("fee").and_then(value_as_f64),
             builder_fee_usd: item.get("builderFee").and_then(value_as_f64),
             crossed: item

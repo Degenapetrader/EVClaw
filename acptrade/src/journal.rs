@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-use crate::types::{CombinedSignal, Direction, UserFill};
+use crate::types::{CombinedSignal, DeadCapSnapshot, Direction, UserFill};
 
 #[derive(Debug, Clone)]
 pub struct TradeRecord {
@@ -407,6 +407,52 @@ impl TradeJournal {
         Ok(inserted > 0)
     }
 
+    pub fn log_dead_cap_history(
+        &self,
+        snapshots: impl IntoIterator<Item = DeadCapSnapshot>,
+    ) -> Result<()> {
+        let mut conn = self.connection()?;
+        let tx = conn.transaction()?;
+        let now_ms = crate::now_ms() as i64;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO dead_cap_history (
+                    created_at_ms, symbol, signal, strength, threshold,
+                    locked_long_pct, locked_short_pct,
+                    effective_long_pct, effective_short_pct,
+                    bad_long_pct, bad_short_pct,
+                    smart_long_pct, smart_short_pct,
+                    observed_pct, locked_wallet_count,
+                    dominant_top_share, persistence_streak, reason
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            )?;
+            for snapshot in snapshots {
+                stmt.execute(params![
+                    now_ms,
+                    snapshot.symbol,
+                    snapshot.signal.as_str(),
+                    snapshot.strength,
+                    snapshot.threshold,
+                    snapshot.locked_long_pct,
+                    snapshot.locked_short_pct,
+                    snapshot.effective_long_pct,
+                    snapshot.effective_short_pct,
+                    snapshot.bad_long_pct,
+                    snapshot.bad_short_pct,
+                    snapshot.smart_long_pct,
+                    snapshot.smart_short_pct,
+                    snapshot.observed_pct,
+                    snapshot.locked_wallet_count as i64,
+                    snapshot.dominant_top_share,
+                    snapshot.persistence_streak as i64,
+                    snapshot.reason,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     fn init_db(&self) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)
@@ -469,7 +515,32 @@ impl TradeJournal {
             CREATE INDEX IF NOT EXISTS idx_fills_symbol_time
                 ON fills (symbol, fill_time_ms);
             CREATE INDEX IF NOT EXISTS idx_fills_trade_id
-                ON fills (trade_id, fill_time_ms);",
+                ON fills (trade_id, fill_time_ms);
+            CREATE TABLE IF NOT EXISTS dead_cap_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at_ms INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                signal TEXT NOT NULL,
+                strength REAL NOT NULL,
+                threshold REAL NOT NULL,
+                locked_long_pct REAL NOT NULL,
+                locked_short_pct REAL NOT NULL,
+                effective_long_pct REAL NOT NULL,
+                effective_short_pct REAL NOT NULL,
+                bad_long_pct REAL NOT NULL,
+                bad_short_pct REAL NOT NULL,
+                smart_long_pct REAL NOT NULL,
+                smart_short_pct REAL NOT NULL,
+                observed_pct REAL NOT NULL,
+                locked_wallet_count INTEGER NOT NULL,
+                dominant_top_share REAL NOT NULL,
+                persistence_streak INTEGER NOT NULL,
+                reason TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_dead_cap_history_symbol_time
+                ON dead_cap_history (symbol, created_at_ms);
+            CREATE INDEX IF NOT EXISTS idx_dead_cap_history_time
+                ON dead_cap_history (created_at_ms);",
         )?;
         ensure_trade_column(&conn, "acp_job_id", "TEXT")?;
         ensure_trade_column(&conn, "acp_phase", "TEXT")?;

@@ -18,6 +18,7 @@ pub struct Config {
     pub acp_mode: bool,
     pub loop_interval_secs: u64,
     pub min_hold_hours: f64,
+    pub reentry_cooldown_secs: u64,
     pub sl_atr_multiplier: f64,
     pub tp_atr_multiplier: f64,
     pub fallback_exit_pct: f64,
@@ -117,6 +118,7 @@ impl Config {
             acp_mode,
             loop_interval_secs: env_u64("EVCLAW_LOOP_INTERVAL_SECS", 60).max(5),
             min_hold_hours: env_f64("EVCLAW_MIN_HOLD_HOURS", 4.0).max(0.0),
+            reentry_cooldown_secs: env_u64("EVCLAW_REENTRY_COOLDOWN_SECS", 3_600).max(0),
             sl_atr_multiplier: env_f64("EVCLAW_SL_ATR_MULTIPLIER", 1.5).max(0.1),
             tp_atr_multiplier: env_f64("EVCLAW_TP_ATR_MULTIPLIER", 1.0).max(0.1),
             fallback_exit_pct: env_f64("EVCLAW_FALLBACK_EXIT_PCT", 0.025).max(0.001),
@@ -154,8 +156,8 @@ impl Config {
                 50_000_000.0,
             )
             .max(0.0),
-            dead_cap_max_extra_wallets: env_u64("EVCLAW_DEAD_CAP_MAX_EXTRA_WALLETS", 2_000)
-                .max(0) as usize,
+            dead_cap_max_extra_wallets: env_u64("EVCLAW_DEAD_CAP_MAX_EXTRA_WALLETS", 2_000).max(0)
+                as usize,
             atr_period: env_u64("EVCLAW_ATR_PERIOD", 14).max(2) as usize,
             atr_interval: env_string("EVCLAW_ATR_INTERVAL", "1h"),
             chase_limit_timeout_secs: env_u64("EVCLAW_CHASE_LIMIT_TIMEOUT_SECS", 15).max(5),

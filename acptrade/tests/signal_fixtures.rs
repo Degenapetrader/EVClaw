@@ -15,7 +15,7 @@ fn dead_cap_low_oi_fixture() {
     let mut signal = DeadCapitalSignal::default();
     let result = signal.evaluate("BTC", &[], &HashMap::new(), 500_000.0, &labels);
     assert_eq!(result.signal, Direction::Neutral);
-    assert_eq!(result.reason, "OI < $10M ($0.50M)");
+    assert_eq!(result.reason, "OI < $1M ($0.50M)");
     assert_eq!(result.threshold, 0.0);
     assert_eq!(result.locked_wallet_count, 0);
     let _ = fs::remove_file(wallet_file);
@@ -44,7 +44,7 @@ fn dead_cap_locked_long_fixture() {
     assert!(result.strength >= 0.75);
     assert_close(result.locked_long_pct, 60.0);
     assert_close(result.locked_short_pct, 0.0);
-    assert_close(result.threshold, 15.0);
+    assert_close(result.threshold, 9.0);
     assert_eq!(result.locked_long_count, 2);
     assert_eq!(result.locked_short_count, 0);
     assert_eq!(result.locked_wallet_count, 2);
@@ -75,7 +75,7 @@ fn dead_cap_locked_short_fixture() {
     assert!(result.strength >= 0.75);
     assert_close(result.locked_long_pct, 0.0);
     assert_close(result.locked_short_pct, 60.0);
-    assert_close(result.threshold, 15.0);
+    assert_close(result.threshold, 9.0);
     assert!(result.reason.contains("-> LONG"));
     let _ = fs::remove_file(wallet_file);
 }
@@ -108,10 +108,10 @@ fn dead_cap_strength_gate_fixture() {
 #[test]
 fn dead_cap_threshold_tiers_fixture() {
     let cases = [
-        (10_000_000.0, 15.0),
-        (100_000_000.0, 15.0),
-        (500_000_000.0, 10.0),
-        (1_000_000_000.0, 6.25),
+        (10_000_000.0, 12.0),
+        (100_000_000.0, 9.0),
+        (500_000_000.0, 6.0),
+        (1_000_000_000.0, 4.0),
     ];
     let wallet_file = temp_file("dead-cap-thresholds", r#"{}"#);
     let labels = label_store(&wallet_file);

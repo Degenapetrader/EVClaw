@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use log::warn;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{DeadCapSnapshot, Direction, ReentryBlock, TrackedPosition};
+use crate::types::{DeadCapSnapshot, Direction, ReentryBlock, SymbolCooldown, TrackedPosition};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct PersistedState {
@@ -16,6 +16,8 @@ struct PersistedState {
     reentry_blocks: Vec<ReentryBlock>,
     #[serde(default)]
     dead_cap_snapshots: Vec<DeadCapSnapshot>,
+    #[serde(default)]
+    symbol_cooldowns: Vec<SymbolCooldown>,
 }
 
 #[derive(Debug, Default)]
@@ -23,6 +25,7 @@ pub struct RuntimeState {
     pub positions: HashMap<String, TrackedPosition>,
     pub reentry_blocks: HashMap<String, Direction>,
     pub dead_cap_snapshots: HashMap<String, DeadCapSnapshot>,
+    pub symbol_cooldowns: HashMap<String, SymbolCooldown>,
 }
 
 pub struct StateStore {
@@ -64,6 +67,10 @@ impl StateStore {
             out.dead_cap_snapshots
                 .insert(snapshot.symbol.clone(), snapshot);
         }
+        for cooldown in state.symbol_cooldowns {
+            out.symbol_cooldowns
+                .insert(cooldown.symbol.clone(), cooldown);
+        }
         Ok(out)
     }
 
@@ -84,6 +91,7 @@ impl StateStore {
                 })
                 .collect(),
             dead_cap_snapshots: state.dead_cap_snapshots.values().cloned().collect(),
+            symbol_cooldowns: state.symbol_cooldowns.values().cloned().collect(),
         };
         let raw = serde_json::to_string_pretty(&persisted)?;
         write_atomic(&self.path, raw.as_bytes())
@@ -115,5 +123,6 @@ mod tests {
         assert!(parsed.positions.is_empty());
         assert!(parsed.reentry_blocks.is_empty());
         assert!(parsed.dead_cap_snapshots.is_empty());
+        assert!(parsed.symbol_cooldowns.is_empty());
     }
 }
