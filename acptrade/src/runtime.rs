@@ -41,6 +41,7 @@ enum ExitDisposition {
 
 const PRESSURE_DECAY_CHECK_INTERVAL_MS: u64 = 15 * 60 * 1_000;
 const PRESSURE_DECAY_THRESHOLD_RATIO: f64 = 0.8;
+const ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK: u32 = 2;
 const LATE_ENTRY_GUARD_8H_ATR_SURCHARGE: f64 = 2.0;
 const LATE_ENTRY_GUARD_12H_ATR_SURCHARGE: f64 = 3.0;
 const LOSS_STREAK_RESET_AFTER: u32 = 6;
@@ -879,6 +880,7 @@ impl EvClawRuntime {
             .filter(|signal| !self.state.positions.contains_key(&signal.symbol))
             .filter(|signal| self.is_symbol_cooldown_active(&signal.symbol, now_ms))
             .count();
+        let mut confirmation_blocked = 0usize;
 
         let mut candidates = signals
             .values()
@@ -888,6 +890,15 @@ impl EvClawRuntime {
             .filter(|signal| !self.is_symbol_cooldown_active(&signal.symbol, now_ms))
             .filter(|signal| self.executor.is_supported_symbol(&signal.symbol))
             .filter_map(|signal| {
+                let dead_cap_snapshot = self.state.dead_cap_snapshots.get(&signal.symbol);
+                if !passes_dead_cap_entry_confirmation(
+                    signal,
+                    dead_cap_snapshot,
+                    ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK,
+                ) {
+                    confirmation_blocked = confirmation_blocked.saturating_add(1);
+                    return None;
+                }
                 snapshot
                     .market_meta
                     .get(&signal.symbol)
@@ -897,9 +908,10 @@ impl EvClawRuntime {
             .collect::<Vec<_>>();
 
         info!(
-            "[ENTRY] actionable_signals={} eligible_candidates={} cooldown_blocked={} occupied_slots={} available_slots={}",
+            "[ENTRY] actionable_signals={} eligible_candidates={} confirmation_blocked={} cooldown_blocked={} occupied_slots={} available_slots={}",
             actionable_total,
             candidates.len(),
+            confirmation_blocked,
             cooldown_blocked,
             occupied_slots,
             available_slots
@@ -2119,6 +2131,22 @@ fn pressure_exit_skips_coverage_low(snapshot: &DeadCapSnapshot) -> bool {
     snapshot.reason.starts_with("coverage low")
 }
 
+fn passes_dead_cap_entry_confirmation(
+    signal: &CombinedSignal,
+    dead_cap_snapshot: Option<&DeadCapSnapshot>,
+    min_persistence_streak: u32,
+) -> bool {
+    if !signal.target_direction.is_actionable() {
+        return false;
+    }
+    let Some(snapshot) = dead_cap_snapshot else {
+        return false;
+    };
+    !pressure_exit_skips_coverage_low(snapshot)
+        && snapshot.signal == signal.target_direction
+        && snapshot.persistence_streak >= min_persistence_streak
+}
+
 fn pressure_exit_metrics(
     position: &TrackedPosition,
     snapshot: &DeadCapSnapshot,
@@ -2807,9 +2835,9 @@ mod tests {
         classify_disappeared_position, classify_trade_streak_outcome, combined_target,
         effective_loss_streak_size_multiplier, infer_sltp_presence,
         late_entry_guard_base_atr_multiplier, late_entry_guard_hit, late_entry_guard_metrics,
-        next_symbol_loss_streak, oi_bucket_policy, pressure_exit_metrics,
-        recent_disappearance_fill_price, should_start_symbol_cooldown, should_submit_acp_sltp,
-        LOSS_STREAK_RESET_AFTER,
+        next_symbol_loss_streak, oi_bucket_policy, passes_dead_cap_entry_confirmation,
+        pressure_exit_metrics, recent_disappearance_fill_price, should_start_symbol_cooldown,
+        should_submit_acp_sltp, ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK, LOSS_STREAK_RESET_AFTER,
     };
     use crate::types::{
         AtrCheckpointData, CombinedSignal, DeadCapSnapshot, Direction, OiBucketPolicy, OpenOrder,
@@ -3229,6 +3257,113 @@ mod tests {
         };
 
         assert!(pressure_exit_metrics(&position, &snapshot, 0.8).is_none());
+    }
+
+    #[test]
+    fn entry_confirmation_requires_two_matching_dead_cap_snapshots() {
+        let signal = CombinedSignal {
+            symbol: "ETH".to_string(),
+            exchange_symbol: "ETH".to_string(),
+            dead_cap: SignalComponent {
+                direction: Direction::Short,
+                strength: 0.9,
+                reason: "dead".to_string(),
+            },
+            whale: SignalComponent::neutral(""),
+            net_score: -0.9,
+            target_direction: Direction::Short,
+            raw_notional_usd: 100.0,
+            order_notional_usd: 100.0,
+            reason: "dead".to_string(),
+        };
+        let snapshot = DeadCapSnapshot {
+            symbol: "ETH".to_string(),
+            signal: Direction::Short,
+            strength: 0.9,
+            threshold: 6.0,
+            locked_long_pct: 0.0,
+            locked_short_pct: 0.0,
+            effective_long_pct: 7.9,
+            effective_short_pct: 1.3,
+            bad_long_pct: 0.0,
+            bad_short_pct: 0.0,
+            smart_long_pct: 0.0,
+            smart_short_pct: 0.0,
+            observed_pct: 97.0,
+            locked_wallet_count: 10,
+            dominant_top_share: 68.0,
+            persistence_streak: ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK,
+            reason: "effL:7.9% -> SHORT".to_string(),
+        };
+        assert!(passes_dead_cap_entry_confirmation(
+            &signal,
+            Some(&snapshot),
+            ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK
+        ));
+
+        let mut one_cycle = snapshot.clone();
+        one_cycle.persistence_streak = ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK - 1;
+        assert!(!passes_dead_cap_entry_confirmation(
+            &signal,
+            Some(&one_cycle),
+            ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK
+        ));
+
+        let mut mismatch = snapshot.clone();
+        mismatch.signal = Direction::Long;
+        assert!(!passes_dead_cap_entry_confirmation(
+            &signal,
+            Some(&mismatch),
+            ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK
+        ));
+    }
+
+    #[test]
+    fn entry_confirmation_rejects_coverage_low_snapshot() {
+        let signal = CombinedSignal {
+            symbol: "ETH".to_string(),
+            exchange_symbol: "ETH".to_string(),
+            dead_cap: SignalComponent {
+                direction: Direction::Short,
+                strength: 0.9,
+                reason: "dead".to_string(),
+            },
+            whale: SignalComponent::neutral(""),
+            net_score: -0.9,
+            target_direction: Direction::Short,
+            raw_notional_usd: 100.0,
+            order_notional_usd: 100.0,
+            reason: "dead".to_string(),
+        };
+        let snapshot = DeadCapSnapshot {
+            symbol: "ETH".to_string(),
+            signal: Direction::Short,
+            strength: 0.9,
+            threshold: 6.0,
+            locked_long_pct: 0.0,
+            locked_short_pct: 0.0,
+            effective_long_pct: 7.9,
+            effective_short_pct: 1.3,
+            bad_long_pct: 0.0,
+            bad_short_pct: 0.0,
+            smart_long_pct: 0.0,
+            smart_short_pct: 0.0,
+            observed_pct: 0.0,
+            locked_wallet_count: 0,
+            dominant_top_share: 0.0,
+            persistence_streak: 4,
+            reason: "coverage low obs:0.0% < gate:3.0%".to_string(),
+        };
+        assert!(!passes_dead_cap_entry_confirmation(
+            &signal,
+            Some(&snapshot),
+            ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK
+        ));
+        assert!(!passes_dead_cap_entry_confirmation(
+            &signal,
+            None,
+            ENTRY_MIN_ACTIONABLE_PERSISTENCE_STREAK
+        ));
     }
 
     #[test]
