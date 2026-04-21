@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-use crate::types::{CombinedSignal, DeadCapSnapshot, Direction, UserFill};
+use crate::types::{CombinedSignal, DeadCapSnapshot, Direction, TradeStreakOutcome, UserFill};
 
 #[derive(Debug, Clone)]
 pub struct TradeRecord {
@@ -181,6 +181,7 @@ impl TradeJournal {
                  exit_time_ms = ?2,
                  exit_reason = ?3,
                  realized_pnl = 0.0,
+                 streak_outcome = 'NEUTRAL',
                  updated_at_ms = ?2
              WHERE id = ?1",
             params![trade_id, now_ms, reason],
@@ -193,6 +194,7 @@ impl TradeJournal {
         trade_id: i64,
         exit_price: f64,
         exit_reason: &str,
+        streak_outcome: TradeStreakOutcome,
         exit_signal: Option<&CombinedSignal>,
     ) -> Result<Option<f64>> {
         let conn = self.connection()?;
@@ -214,6 +216,7 @@ impl TradeJournal {
                  exit_reason = ?4,
                  realized_pnl = ?5,
                  exit_snapshot = ?6,
+                 streak_outcome = ?7,
                  updated_at_ms = ?2
              WHERE id = ?1",
             params![
@@ -222,7 +225,8 @@ impl TradeJournal {
                 exit_price,
                 exit_reason,
                 pnl,
-                exit_snapshot
+                exit_snapshot,
+                streak_outcome.as_str(),
             ],
         )?;
         Ok(Some(pnl))
@@ -335,23 +339,36 @@ impl TradeJournal {
         })
     }
 
-    pub fn symbol_loss_streaks(&self, reset_after_losses: u32) -> Result<HashMap<String, u32>> {
+    pub fn symbol_loss_streaks(
+        &self,
+        reset_after_losses: u32,
+        start_after_trade_id: i64,
+    ) -> Result<HashMap<String, u32>> {
         let conn = self.connection()?;
         let mut stmt = conn.prepare(
-            "SELECT symbol, COALESCE(realized_pnl, 0.0)
+            "SELECT symbol, COALESCE(streak_outcome, ''), COALESCE(realized_pnl, 0.0)
              FROM trades
              WHERE status = 'CLOSED'
+               AND id > ?1
              ORDER BY id ASC",
         )?;
-        let rows = stmt.query_map(params![], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        let rows = stmt.query_map(params![start_after_trade_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, f64>(2)?,
+            ))
         })?;
 
         let mut streaks = HashMap::new();
         for row in rows {
-            let (symbol, realized_pnl) = row?;
+            let (symbol, streak_outcome, realized_pnl) = row?;
             let current = streaks.get(&symbol).copied().unwrap_or(0);
-            let next = next_loss_streak(current, realized_pnl, reset_after_losses);
+            let next = next_loss_streak(
+                current,
+                parse_streak_outcome(&streak_outcome, realized_pnl),
+                reset_after_losses,
+            );
             if next == 0 {
                 streaks.remove(&symbol);
             } else {
@@ -359,6 +376,16 @@ impl TradeJournal {
             }
         }
         Ok(streaks)
+    }
+
+    pub fn max_trade_id(&self) -> Result<i64> {
+        self.connection()?
+            .query_row(
+                "SELECT COALESCE(MAX(id), 0) FROM trades",
+                params![],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(Into::into)
     }
 
     pub fn last_fill_time_ms(&self) -> Result<Option<i64>> {
@@ -568,6 +595,7 @@ impl TradeJournal {
         ensure_trade_column(&conn, "acp_job_id", "TEXT")?;
         ensure_trade_column(&conn, "acp_phase", "TEXT")?;
         ensure_trade_column(&conn, "hl_order_id", "TEXT")?;
+        ensure_trade_column(&conn, "streak_outcome", "TEXT")?;
         Ok(())
     }
 
@@ -648,11 +676,30 @@ fn fill_matches_closed_trade_exit_reason(exit_reason: &str) -> bool {
     ) || exit_reason.starts_with("PRESSURE_DECAY")
 }
 
-fn next_loss_streak(current: u32, realized_pnl: f64, reset_after_losses: u32) -> u32 {
-    if realized_pnl > 0.0 {
+fn parse_streak_outcome(raw: &str, realized_pnl: f64) -> TradeStreakOutcome {
+    match TradeStreakOutcome::from_db_str(raw) {
+        TradeStreakOutcome::Neutral if raw.trim().is_empty() => {
+            if realized_pnl > 0.0 {
+                TradeStreakOutcome::Win
+            } else if realized_pnl < 0.0 {
+                TradeStreakOutcome::Loss
+            } else {
+                TradeStreakOutcome::Neutral
+            }
+        }
+        outcome => outcome,
+    }
+}
+
+fn next_loss_streak(
+    current: u32,
+    streak_outcome: TradeStreakOutcome,
+    reset_after_losses: u32,
+) -> u32 {
+    if streak_outcome == TradeStreakOutcome::Win {
         return 0;
     }
-    if realized_pnl < 0.0 {
+    if streak_outcome == TradeStreakOutcome::Loss {
         let next = current.saturating_add(1);
         return if reset_after_losses > 0 && next >= reset_after_losses {
             0
@@ -665,7 +712,8 @@ fn next_loss_streak(current: u32, realized_pnl: f64, reset_after_losses: u32) ->
 
 #[cfg(test)]
 mod tests {
-    use super::fill_matches_closed_trade_exit_reason;
+    use super::{fill_matches_closed_trade_exit_reason, next_loss_streak, parse_streak_outcome};
+    use crate::types::TradeStreakOutcome;
 
     #[test]
     fn pressure_decay_closed_trades_can_absorb_late_fills() {
@@ -677,5 +725,17 @@ mod tests {
     #[test]
     fn order_failed_closed_trades_do_not_absorb_late_fills() {
         assert!(!fill_matches_closed_trade_exit_reason("ORDER_FAILED"));
+    }
+
+    #[test]
+    fn blank_legacy_streak_outcome_falls_back_to_realized_pnl_sign() {
+        assert_eq!(parse_streak_outcome("", 1.0), TradeStreakOutcome::Win);
+        assert_eq!(parse_streak_outcome("", -1.0), TradeStreakOutcome::Loss);
+        assert_eq!(parse_streak_outcome("", 0.0), TradeStreakOutcome::Neutral);
+    }
+
+    #[test]
+    fn neutral_streak_outcome_does_not_change_loss_streak() {
+        assert_eq!(next_loss_streak(3, TradeStreakOutcome::Neutral, 6), 3);
     }
 }

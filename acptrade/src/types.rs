@@ -10,6 +10,31 @@ pub enum Direction {
     Neutral,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradeStreakOutcome {
+    Win,
+    Loss,
+    Neutral,
+}
+
+impl TradeStreakOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Win => "WIN",
+            Self::Loss => "LOSS",
+            Self::Neutral => "NEUTRAL",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Self {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "WIN" => Self::Win,
+            "LOSS" => Self::Loss,
+            _ => Self::Neutral,
+        }
+    }
+}
+
 impl Direction {
     pub fn as_str(self) -> &'static str {
         match self {

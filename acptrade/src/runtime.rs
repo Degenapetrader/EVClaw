@@ -21,7 +21,7 @@ use crate::state::{RuntimeState, StateStore};
 use crate::types::{
     AccountDataSnapshot, AccountSummary, AtrCheckpointData, CombinedSignal, DeadCapSnapshot,
     Direction, LivePosition, MarketMeta, OiBucketPolicy, OpenOrder, SignalComponent,
-    SymbolCooldown, TrackedPosition, UserFill,
+    SymbolCooldown, TrackedPosition, TradeStreakOutcome, UserFill,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +45,7 @@ const LATE_ENTRY_GUARD_8H_ATR_SURCHARGE: f64 = 2.0;
 const LATE_ENTRY_GUARD_12H_ATR_SURCHARGE: f64 = 3.0;
 const LOSS_STREAK_RESET_AFTER: u32 = 6;
 const LOSS_STREAK_JITTER_RATIO: f64 = 0.10;
+const LOSS_STREAK_PNL_THRESHOLD_RATIO: f64 = 0.5;
 
 const DISAPPEARED_FILL_LOOKBACK_MS: u64 = 15 * 60 * 1_000;
 const DISAPPEARED_FILL_CLUSTER_MS: u64 = 2 * 60 * 1_000;
@@ -83,7 +84,10 @@ impl EvClawRuntime {
         let mut state = state_store.load()?;
         state.reentry_blocks.clear();
         let journal = TradeJournal::new(cfg.journal_path.clone())?;
-        state.loss_streaks = journal.symbol_loss_streaks(LOSS_STREAK_RESET_AFTER)?;
+        state.loss_streaks = journal.symbol_loss_streaks(
+            LOSS_STREAK_RESET_AFTER,
+            state.loss_streak_start_after_trade_id,
+        )?;
 
         info!(
             "[startup] mode={} trading_address={} vault_address={}",
@@ -408,45 +412,71 @@ impl EvClawRuntime {
     fn close_trade_and_update_streak(
         &mut self,
         trade_id: i64,
-        symbol: &str,
+        position: &TrackedPosition,
         exit_price: f64,
         exit_reason: &str,
         exit_signal: Option<&CombinedSignal>,
     ) -> Result<Option<f64>> {
-        let pnl = self
-            .journal
-            .close_trade(trade_id, exit_price, exit_reason, exit_signal)?;
+        let realized_pnl = realized_trade_pnl(
+            position.direction,
+            position.entry_price,
+            exit_price,
+            position.qty,
+        );
+        let streak_outcome = classify_trade_streak_outcome(position, realized_pnl);
+        let pnl = self.journal.close_trade(
+            trade_id,
+            exit_price,
+            exit_reason,
+            streak_outcome,
+            exit_signal,
+        )?;
         if let Some(realized_pnl) = pnl {
-            self.apply_symbol_close_outcome(symbol, realized_pnl);
+            self.apply_symbol_close_outcome(position, realized_pnl, streak_outcome);
         }
         Ok(pnl)
     }
 
-    fn apply_symbol_close_outcome(&mut self, symbol: &str, realized_pnl: f64) {
+    fn apply_symbol_close_outcome(
+        &mut self,
+        position: &TrackedPosition,
+        realized_pnl: f64,
+        streak_outcome: TradeStreakOutcome,
+    ) {
+        let symbol = &position.symbol;
         let current = self.state.loss_streaks.get(symbol).copied().unwrap_or(0);
-        let next = next_symbol_loss_streak(current, realized_pnl);
+        let next = next_symbol_loss_streak(current, streak_outcome);
         if next == 0 {
             self.state.loss_streaks.remove(symbol);
         } else {
             self.state.loss_streaks.insert(symbol.to_string(), next);
         }
-        if realized_pnl > 0.0 {
+        let (loss_threshold_pnl, win_threshold_pnl) = streak_threshold_pnls(position);
+        if streak_outcome == TradeStreakOutcome::Win {
             info!(
-                "[{}] loss streak reset after win pnl={:+.2}",
-                symbol, realized_pnl
+                "[{}] loss streak reset after qualified win pnl={:+.2} win_threshold={:.2}",
+                symbol, realized_pnl, win_threshold_pnl
             );
-        } else if realized_pnl < 0.0 {
+        } else if streak_outcome == TradeStreakOutcome::Loss {
             if next == 0 {
                 info!(
-                    "[{}] loss streak reset after {} consecutive losses pnl={:+.2}",
-                    symbol, LOSS_STREAK_RESET_AFTER, realized_pnl
+                    "[{}] loss streak reset after {} qualified losses pnl={:+.2} loss_threshold={:.2}",
+                    symbol,
+                    LOSS_STREAK_RESET_AFTER,
+                    realized_pnl,
+                    loss_threshold_pnl
                 );
             } else {
                 info!(
-                    "[{}] loss streak advanced to {} pnl={:+.2}",
-                    symbol, next, realized_pnl
+                    "[{}] loss streak advanced to {} pnl={:+.2} loss_threshold={:.2}",
+                    symbol, next, realized_pnl, loss_threshold_pnl
                 );
             }
+        } else {
+            info!(
+                "[{}] loss streak unchanged pnl={:+.2} win_threshold={:.2} loss_threshold={:.2}",
+                symbol, realized_pnl, win_threshold_pnl, loss_threshold_pnl
+            );
         }
     }
 
@@ -506,7 +536,7 @@ impl EvClawRuntime {
                     if let Some(trade_id) = trade_id {
                         let _ = self.close_trade_and_update_streak(
                             trade_id,
-                            &symbol,
+                            &tracked,
                             exit_price,
                             &exit_reason,
                             exit_signal,
@@ -537,7 +567,7 @@ impl EvClawRuntime {
                     if let Some(trade_id) = trade_id {
                         let _ = self.close_trade_and_update_streak(
                             trade_id,
-                            &symbol,
+                            &tracked,
                             live.entry_price.max(tracked.entry_price),
                             "DIRECTION_CHANGED",
                             signals.get(&symbol),
@@ -1383,7 +1413,7 @@ impl EvClawRuntime {
             {
                 let _ = self.close_trade_and_update_streak(
                     trade_id,
-                    &position.symbol,
+                    position,
                     exit_price,
                     reason,
                     exit_signal,
@@ -1418,7 +1448,7 @@ impl EvClawRuntime {
         {
             let _ = self.close_trade_and_update_streak(
                 trade_id,
-                &position.symbol,
+                position,
                 exit_price,
                 reason,
                 exit_signal,
@@ -2660,11 +2690,58 @@ fn resolved_bucket_policy(
     }
 }
 
-fn next_symbol_loss_streak(current: u32, realized_pnl: f64) -> u32 {
-    if realized_pnl > 0.0 {
+fn realized_trade_pnl(direction: Direction, entry_price: f64, exit_price: f64, size: f64) -> f64 {
+    match direction {
+        Direction::Long => (exit_price - entry_price) * size,
+        Direction::Short => (entry_price - exit_price) * size,
+        Direction::Neutral => 0.0,
+    }
+}
+
+fn expected_position_pnl(position: &TrackedPosition, target_price: f64) -> f64 {
+    if !position.direction.is_actionable()
+        || position.qty <= 0.0
+        || position.entry_price <= 0.0
+        || target_price <= 0.0
+    {
+        return 0.0;
+    }
+    realized_trade_pnl(
+        position.direction,
+        position.entry_price,
+        target_price,
+        position.qty,
+    )
+    .abs()
+}
+
+fn streak_threshold_pnls(position: &TrackedPosition) -> (f64, f64) {
+    let loss_threshold =
+        expected_position_pnl(position, position.stop_price) * LOSS_STREAK_PNL_THRESHOLD_RATIO;
+    let win_threshold = expected_position_pnl(position, position.take_profit_price)
+        * LOSS_STREAK_PNL_THRESHOLD_RATIO;
+    (loss_threshold, win_threshold)
+}
+
+fn classify_trade_streak_outcome(
+    position: &TrackedPosition,
+    realized_pnl: f64,
+) -> TradeStreakOutcome {
+    let (loss_threshold, win_threshold) = streak_threshold_pnls(position);
+    if win_threshold > 0.0 && realized_pnl >= win_threshold {
+        return TradeStreakOutcome::Win;
+    }
+    if loss_threshold > 0.0 && realized_pnl <= -loss_threshold {
+        return TradeStreakOutcome::Loss;
+    }
+    TradeStreakOutcome::Neutral
+}
+
+fn next_symbol_loss_streak(current: u32, streak_outcome: TradeStreakOutcome) -> u32 {
+    if streak_outcome == TradeStreakOutcome::Win {
         return 0;
     }
-    if realized_pnl < 0.0 {
+    if streak_outcome == TradeStreakOutcome::Loss {
         let next = current.saturating_add(1);
         return if next >= LOSS_STREAK_RESET_AFTER {
             0
@@ -2727,15 +2804,16 @@ fn should_start_symbol_cooldown(exit_reason: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_disappeared_position, combined_target, effective_loss_streak_size_multiplier,
-        infer_sltp_presence, late_entry_guard_base_atr_multiplier, late_entry_guard_hit,
-        late_entry_guard_metrics, next_symbol_loss_streak, oi_bucket_policy, pressure_exit_metrics,
+        classify_disappeared_position, classify_trade_streak_outcome, combined_target,
+        effective_loss_streak_size_multiplier, infer_sltp_presence,
+        late_entry_guard_base_atr_multiplier, late_entry_guard_hit, late_entry_guard_metrics,
+        next_symbol_loss_streak, oi_bucket_policy, pressure_exit_metrics,
         recent_disappearance_fill_price, should_start_symbol_cooldown, should_submit_acp_sltp,
         LOSS_STREAK_RESET_AFTER,
     };
     use crate::types::{
         AtrCheckpointData, CombinedSignal, DeadCapSnapshot, Direction, OiBucketPolicy, OpenOrder,
-        SignalComponent, TrackedPosition, UserFill,
+        SignalComponent, TrackedPosition, TradeStreakOutcome, UserFill,
     };
 
     #[test]
@@ -3280,20 +3358,70 @@ mod tests {
     #[test]
     fn symbol_loss_streak_resets_on_win_and_sixth_loss() {
         let mut streak = 0;
-        streak = next_symbol_loss_streak(streak, -1.0);
+        streak = next_symbol_loss_streak(streak, TradeStreakOutcome::Loss);
         assert_eq!(streak, 1);
-        streak = next_symbol_loss_streak(streak, -1.0);
+        streak = next_symbol_loss_streak(streak, TradeStreakOutcome::Loss);
         assert_eq!(streak, 2);
-        streak = next_symbol_loss_streak(streak, 1.0);
+        streak = next_symbol_loss_streak(streak, TradeStreakOutcome::Win);
         assert_eq!(streak, 0);
 
         let mut streak = 0;
         for expected in 1..LOSS_STREAK_RESET_AFTER {
-            streak = next_symbol_loss_streak(streak, -1.0);
+            streak = next_symbol_loss_streak(streak, TradeStreakOutcome::Loss);
             assert_eq!(streak, expected);
         }
-        streak = next_symbol_loss_streak(streak, -1.0);
+        streak = next_symbol_loss_streak(streak, TradeStreakOutcome::Loss);
         assert_eq!(streak, 0);
+    }
+
+    #[test]
+    fn trade_streak_outcome_requires_half_of_expected_sltp_pnl() {
+        let position = TrackedPosition {
+            symbol: "NEAR".to_string(),
+            exchange_symbol: "NEAR".to_string(),
+            direction: Direction::Short,
+            qty: 100.0,
+            entry_price: 10.0,
+            entry_notional_usd: 1_000.0,
+            stop_price: 11.0,
+            take_profit_price: 8.0,
+            opened_at_ms: 0,
+            entry_signal: CombinedSignal {
+                symbol: "NEAR".to_string(),
+                exchange_symbol: "NEAR".to_string(),
+                dead_cap: SignalComponent::neutral(""),
+                whale: SignalComponent::neutral(""),
+                net_score: -1.0,
+                target_direction: Direction::Short,
+                raw_notional_usd: 100.0,
+                order_notional_usd: 100.0,
+                reason: String::new(),
+            },
+            bucket_policy: OiBucketPolicy::default(),
+            trade_id: None,
+            entry_source: "signal".to_string(),
+            acp_sltp_last_submit_ms: 0,
+            acp_sltp_last_stop_price: 0.0,
+            acp_sltp_last_take_profit_price: 0.0,
+            pressure_exit_last_check_ms: 0,
+        };
+
+        assert_eq!(
+            classify_trade_streak_outcome(&position, 99.0),
+            TradeStreakOutcome::Neutral
+        );
+        assert_eq!(
+            classify_trade_streak_outcome(&position, -49.0),
+            TradeStreakOutcome::Neutral
+        );
+        assert_eq!(
+            classify_trade_streak_outcome(&position, 100.0),
+            TradeStreakOutcome::Win
+        );
+        assert_eq!(
+            classify_trade_streak_outcome(&position, -50.0),
+            TradeStreakOutcome::Loss
+        );
     }
 
     #[test]
