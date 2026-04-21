@@ -18,6 +18,8 @@ struct PersistedState {
     dead_cap_snapshots: Vec<DeadCapSnapshot>,
     #[serde(default)]
     symbol_cooldowns: Vec<SymbolCooldown>,
+    #[serde(default)]
+    loss_streaks: HashMap<String, u32>,
 }
 
 #[derive(Debug, Default)]
@@ -26,6 +28,7 @@ pub struct RuntimeState {
     pub reentry_blocks: HashMap<String, Direction>,
     pub dead_cap_snapshots: HashMap<String, DeadCapSnapshot>,
     pub symbol_cooldowns: HashMap<String, SymbolCooldown>,
+    pub loss_streaks: HashMap<String, u32>,
 }
 
 pub struct StateStore {
@@ -71,6 +74,7 @@ impl StateStore {
             out.symbol_cooldowns
                 .insert(cooldown.symbol.clone(), cooldown);
         }
+        out.loss_streaks = state.loss_streaks;
         Ok(out)
     }
 
@@ -92,6 +96,7 @@ impl StateStore {
                 .collect(),
             dead_cap_snapshots: state.dead_cap_snapshots.values().cloned().collect(),
             symbol_cooldowns: state.symbol_cooldowns.values().cloned().collect(),
+            loss_streaks: state.loss_streaks.clone(),
         };
         let raw = serde_json::to_string_pretty(&persisted)?;
         write_atomic(&self.path, raw.as_bytes())
@@ -124,5 +129,6 @@ mod tests {
         assert!(parsed.reentry_blocks.is_empty());
         assert!(parsed.dead_cap_snapshots.is_empty());
         assert!(parsed.symbol_cooldowns.is_empty());
+        assert!(parsed.loss_streaks.is_empty());
     }
 }

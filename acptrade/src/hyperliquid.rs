@@ -716,10 +716,18 @@ impl ExecutionClient {
     }
 
     pub async fn cancel_all_limit_orders(&mut self, symbol: Option<&str>) -> Result<usize> {
+        self.cancel_passive_limit_orders(symbol, false).await
+    }
+
+    async fn cancel_passive_limit_orders(
+        &mut self,
+        symbol: Option<&str>,
+        include_reduce_only: bool,
+    ) -> Result<usize> {
         let orders = self.get_open_orders(symbol).await?;
         let mut cancelled = 0usize;
         for order in orders {
-            if order.order_type != "limit" || order.reduce_only {
+            if !is_passive_limit_order(&order, include_reduce_only) {
                 continue;
             }
             if self
@@ -980,7 +988,7 @@ impl ExecutionClient {
         self.wait_rate_limit_backoff().await;
 
         if let Err(err) = self
-            .clear_resting_limit_orders(symbol, "pre-chase cleanup")
+            .clear_resting_limit_orders(symbol, "pre-chase cleanup", reduce_only)
             .await
         {
             return Ok(OrderResult {
@@ -1028,7 +1036,7 @@ impl ExecutionClient {
 
             if current_order_id.is_none() {
                 if let Err(err) = self
-                    .clear_resting_limit_orders(symbol, "pre-submit cleanup")
+                    .clear_resting_limit_orders(symbol, "pre-submit cleanup", reduce_only)
                     .await
                 {
                     return Ok(OrderResult {
@@ -1056,7 +1064,7 @@ impl ExecutionClient {
                 )
                 .await?;
                 if remaining <= 0.0 {
-                    self.clear_resting_limit_orders(symbol, "position delta fill")
+                    self.clear_resting_limit_orders(symbol, "position delta fill", reduce_only)
                         .await?;
                     let avg_px = if filled_total > 0.0 {
                         filled_notional / filled_total
@@ -1094,6 +1102,7 @@ impl ExecutionClient {
                             response.filled_size,
                             response.filled_size * response.filled_price.max(limit_px),
                             response.filled_price.max(limit_px),
+                            reduce_only,
                             response
                                 .error
                                 .unwrap_or_else(|| "direct limit submission failed".to_string()),
@@ -1112,7 +1121,7 @@ impl ExecutionClient {
                     filled_notional += response.filled_size * response.filled_price.max(limit_px);
                     remaining = (requested_size - filled_total).max(0.0);
                     if remaining <= 0.0 {
-                        self.clear_resting_limit_orders(symbol, "submit fill")
+                        self.clear_resting_limit_orders(symbol, "submit fill", reduce_only)
                             .await?;
                         let avg_px = if filled_total > 0.0 {
                             filled_notional / filled_total
@@ -1162,7 +1171,7 @@ impl ExecutionClient {
                             .await?;
                         }
                         if remaining <= 0.0 {
-                            self.clear_resting_limit_orders(symbol, "status fill")
+                            self.clear_resting_limit_orders(symbol, "status fill", reduce_only)
                                 .await?;
                             let avg_px = if filled_total > 0.0 {
                                 filled_notional / filled_total
@@ -1184,6 +1193,7 @@ impl ExecutionClient {
                                 filled_total,
                                 filled_notional,
                                 status.average.max(current_limit_px.unwrap_or(mid)),
+                                reduce_only,
                                 "inactive chase order disappeared before fill settlement",
                             )
                             .await;
@@ -1205,12 +1215,13 @@ impl ExecutionClient {
                                 filled_total,
                                 filled_notional,
                                 active_limit_px,
+                                reduce_only,
                                 "failed to cancel resting chase order",
                             )
                             .await;
                     }
                     if let Err(err) = self
-                        .clear_resting_limit_orders(symbol, "replace cancel")
+                        .clear_resting_limit_orders(symbol, "replace cancel", reduce_only)
                         .await
                     {
                         return self
@@ -1220,6 +1231,7 @@ impl ExecutionClient {
                                 filled_total,
                                 filled_notional,
                                 active_limit_px,
+                                reduce_only,
                                 err.to_string(),
                             )
                             .await;
@@ -1267,6 +1279,7 @@ impl ExecutionClient {
                                 filled_total,
                                 filled_notional,
                                 active_limit_px,
+                                reduce_only,
                                 "replaced chase order disappeared before fill settlement",
                             )
                             .await;
@@ -1299,7 +1312,7 @@ impl ExecutionClient {
                         });
                     }
                     if let Err(err) = self
-                        .clear_resting_limit_orders(symbol, "filled-target cleanup")
+                        .clear_resting_limit_orders(symbol, "filled-target cleanup", reduce_only)
                         .await
                     {
                         return Ok(OrderResult {
@@ -1344,6 +1357,7 @@ impl ExecutionClient {
                         filled_total,
                         filled_notional,
                         0.0,
+                        reduce_only,
                         "chase-limit timeout with active resting order",
                     )
                     .await;
@@ -1367,7 +1381,7 @@ impl ExecutionClient {
             }
         }
         if self
-            .clear_resting_limit_orders(symbol, "chase timeout")
+            .clear_resting_limit_orders(symbol, "chase timeout", reduce_only)
             .await
             .is_err()
         {
@@ -1378,6 +1392,7 @@ impl ExecutionClient {
                     filled_total,
                     filled_notional,
                     0.0,
+                    reduce_only,
                     "chase-limit timeout left resting orders on book",
                 )
                 .await;
@@ -1652,23 +1667,37 @@ impl ExecutionClient {
 
     async fn is_order_still_open(&self, symbol: &str, order_id: &str) -> Result<bool> {
         let open_orders = self.get_open_orders(Some(symbol)).await?;
-        Ok(open_orders.iter().any(|order| {
-            order.order_type == "limit" && !order.reduce_only && order.order_id == order_id
-        }))
+        Ok(open_orders
+            .iter()
+            .any(|order| is_passive_limit_order(order, true) && order.order_id == order_id))
     }
 
-    async fn has_resting_limit_orders(&self, symbol: &str) -> Result<bool> {
+    async fn has_resting_limit_orders(
+        &self,
+        symbol: &str,
+        include_reduce_only: bool,
+    ) -> Result<bool> {
         let open_orders = self.get_open_orders(Some(symbol)).await?;
         Ok(open_orders
             .iter()
-            .any(|order| order.order_type == "limit" && !order.reduce_only))
+            .any(|order| is_passive_limit_order(order, include_reduce_only)))
     }
 
-    async fn clear_resting_limit_orders(&mut self, symbol: &str, context: &str) -> Result<()> {
+    async fn clear_resting_limit_orders(
+        &mut self,
+        symbol: &str,
+        context: &str,
+        include_reduce_only: bool,
+    ) -> Result<()> {
         let mut total_cleared = 0usize;
         for attempt in 0..=ORDER_CANCEL_CONFIRM_RETRIES {
-            total_cleared += self.cancel_all_limit_orders(Some(symbol)).await?;
-            if !self.has_resting_limit_orders(symbol).await? {
+            total_cleared += self
+                .cancel_passive_limit_orders(Some(symbol), include_reduce_only)
+                .await?;
+            if !self
+                .has_resting_limit_orders(symbol, include_reduce_only)
+                .await?
+            {
                 if total_cleared > 0 {
                     warn!(
                         "[{}] cancelled {} residual limit orders after {}",
@@ -1693,11 +1722,12 @@ impl ExecutionClient {
         filled_total: f64,
         filled_notional: f64,
         fallback_price: f64,
+        include_reduce_only: bool,
         error: impl Into<String>,
     ) -> Result<OrderResult> {
         let mut error = error.into();
         if let Err(cleanup_err) = self
-            .clear_resting_limit_orders(symbol, "entry failure cleanup")
+            .clear_resting_limit_orders(symbol, "entry failure cleanup", include_reduce_only)
             .await
         {
             error = format!("{error}; {cleanup_err}");
@@ -2403,6 +2433,11 @@ fn order_qty_epsilon(qty: f64) -> f64 {
     qty.abs().max(1.0) * 1e-6
 }
 
+fn is_passive_limit_order(order: &OpenOrder, include_reduce_only: bool) -> bool {
+    order.order_type == "limit"
+        || (include_reduce_only && order.reduce_only && order.order_type == "unknown_reduce_only")
+}
+
 fn trigger_order_mode(order_type: &str) -> (bool, &'static str) {
     match order_type {
         "sl" => (true, "sl"),
@@ -2540,8 +2575,10 @@ mod tests {
     use std::collections::HashSet;
 
     use super::{
-        binance_symbol_to_hl, normalized_limit_price, trigger_order_mode, wallet_set_signature,
+        binance_symbol_to_hl, is_passive_limit_order, normalized_limit_price, trigger_order_mode,
+        wallet_set_signature,
     };
+    use crate::types::OpenOrder;
 
     #[test]
     fn link_price_normalization_matches_hyperliquid_precision_rules() {
@@ -2576,5 +2613,33 @@ mod tests {
     fn take_profit_uses_trigger_limit_not_market() {
         assert_eq!(trigger_order_mode("sl"), (true, "sl"));
         assert_eq!(trigger_order_mode("tp"), (false, "tp"));
+    }
+
+    #[test]
+    fn passive_limit_matching_distinguishes_reduce_only_chase_orders() {
+        let order = OpenOrder {
+            order_id: "1".to_string(),
+            order_type: "limit".to_string(),
+            reduce_only: false,
+            price: 100_000.0,
+            size: 1.0,
+            symbol: "BTC".to_string(),
+        };
+        assert!(is_passive_limit_order(&order, false));
+
+        let reduce_only_limit = OpenOrder {
+            order_type: "unknown_reduce_only".to_string(),
+            reduce_only: true,
+            ..order.clone()
+        };
+        assert!(!is_passive_limit_order(&reduce_only_limit, false));
+        assert!(is_passive_limit_order(&reduce_only_limit, true));
+
+        let trigger = OpenOrder {
+            order_type: "sl".to_string(),
+            reduce_only: true,
+            ..order
+        };
+        assert!(!is_passive_limit_order(&trigger, true));
     }
 }

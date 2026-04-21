@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -41,6 +43,8 @@ const PRESSURE_DECAY_CHECK_INTERVAL_MS: u64 = 15 * 60 * 1_000;
 const PRESSURE_DECAY_THRESHOLD_RATIO: f64 = 0.8;
 const LATE_ENTRY_GUARD_8H_ATR_SURCHARGE: f64 = 2.0;
 const LATE_ENTRY_GUARD_12H_ATR_SURCHARGE: f64 = 3.0;
+const LOSS_STREAK_RESET_AFTER: u32 = 6;
+const LOSS_STREAK_JITTER_RATIO: f64 = 0.10;
 
 const DISAPPEARED_FILL_LOOKBACK_MS: u64 = 15 * 60 * 1_000;
 const DISAPPEARED_FILL_CLUSTER_MS: u64 = 2 * 60 * 1_000;
@@ -79,6 +83,7 @@ impl EvClawRuntime {
         let mut state = state_store.load()?;
         state.reentry_blocks.clear();
         let journal = TradeJournal::new(cfg.journal_path.clone())?;
+        state.loss_streaks = journal.symbol_loss_streaks(LOSS_STREAK_RESET_AFTER)?;
 
         info!(
             "[startup] mode={} trading_address={} vault_address={}",
@@ -400,6 +405,51 @@ impl EvClawRuntime {
         self.state.reentry_blocks.remove(symbol);
     }
 
+    fn close_trade_and_update_streak(
+        &mut self,
+        trade_id: i64,
+        symbol: &str,
+        exit_price: f64,
+        exit_reason: &str,
+        exit_signal: Option<&CombinedSignal>,
+    ) -> Result<Option<f64>> {
+        let pnl = self
+            .journal
+            .close_trade(trade_id, exit_price, exit_reason, exit_signal)?;
+        if let Some(realized_pnl) = pnl {
+            self.apply_symbol_close_outcome(symbol, realized_pnl);
+        }
+        Ok(pnl)
+    }
+
+    fn apply_symbol_close_outcome(&mut self, symbol: &str, realized_pnl: f64) {
+        let current = self.state.loss_streaks.get(symbol).copied().unwrap_or(0);
+        let next = next_symbol_loss_streak(current, realized_pnl);
+        if next == 0 {
+            self.state.loss_streaks.remove(symbol);
+        } else {
+            self.state.loss_streaks.insert(symbol.to_string(), next);
+        }
+        if realized_pnl > 0.0 {
+            info!(
+                "[{}] loss streak reset after win pnl={:+.2}",
+                symbol, realized_pnl
+            );
+        } else if realized_pnl < 0.0 {
+            if next == 0 {
+                info!(
+                    "[{}] loss streak reset after {} consecutive losses pnl={:+.2}",
+                    symbol, LOSS_STREAK_RESET_AFTER, realized_pnl
+                );
+            } else {
+                info!(
+                    "[{}] loss streak advanced to {} pnl={:+.2}",
+                    symbol, next, realized_pnl
+                );
+            }
+        }
+    }
+
     async fn sync_tracked_positions(
         &mut self,
         live_positions: &HashMap<String, LivePosition>,
@@ -454,8 +504,9 @@ impl EvClawRuntime {
                         None => self.journal.find_open_trade(&symbol)?.map(|trade| trade.id),
                     };
                     if let Some(trade_id) = trade_id {
-                        let _ = self.journal.close_trade(
+                        let _ = self.close_trade_and_update_streak(
                             trade_id,
+                            &symbol,
                             exit_price,
                             &exit_reason,
                             exit_signal,
@@ -484,8 +535,9 @@ impl EvClawRuntime {
                         None => self.journal.find_open_trade(&symbol)?.map(|trade| trade.id),
                     };
                     if let Some(trade_id) = trade_id {
-                        let _ = self.journal.close_trade(
+                        let _ = self.close_trade_and_update_streak(
                             trade_id,
+                            &symbol,
                             live.entry_price.max(tracked.entry_price),
                             "DIRECTION_CHANGED",
                             signals.get(&symbol),
@@ -851,10 +903,36 @@ impl EvClawRuntime {
                 continue;
             }
             let bucket_policy = oi_bucket_policy(meta.oi_usd);
+            let loss_streak = self
+                .state
+                .loss_streaks
+                .get(&signal.symbol)
+                .copied()
+                .unwrap_or(0);
+            let size_multiplier = effective_loss_streak_size_multiplier(
+                &signal.symbol,
+                loss_streak,
+                &bucket_policy,
+                self.cycle_count,
+                now_ms,
+            );
+            let mut adjusted_signal = signal.clone();
+            if (size_multiplier - 1.0).abs() > f64::EPSILON {
+                adjusted_signal.raw_notional_usd *= size_multiplier;
+                adjusted_signal.order_notional_usd *= size_multiplier;
+                adjusted_signal.reason = format!(
+                    "{} loss_streak={} size_mult={:.3} step_base={:.2}",
+                    adjusted_signal.reason,
+                    loss_streak,
+                    size_multiplier,
+                    loss_streak_step_multiplier(&bucket_policy)
+                );
+            }
 
-            let requested_qty = self
-                .executor
-                .round_size(signal.order_notional_usd / meta.mark_px, &signal.symbol);
+            let requested_qty = self.executor.round_size(
+                adjusted_signal.order_notional_usd / meta.mark_px,
+                &signal.symbol,
+            );
             if requested_qty <= 0.0 {
                 continue;
             }
@@ -862,8 +940,8 @@ impl EvClawRuntime {
                 if !self
                     .passes_late_entry_guard(
                         &signal.symbol,
-                        &signal.exchange_symbol,
-                        signal.target_direction,
+                        &adjusted_signal.exchange_symbol,
+                        adjusted_signal.target_direction,
                         meta.mark_px,
                         &bucket_policy,
                     )
@@ -873,16 +951,19 @@ impl EvClawRuntime {
                 }
                 info!(
                     "[{}] DRY RUN: Would {} {:.6} @ {:.6} notional={:.2} {}",
-                    signal.symbol,
-                    signal.target_direction,
+                    adjusted_signal.symbol,
+                    adjusted_signal.target_direction,
                     requested_qty,
                     meta.mark_px,
                     requested_qty * meta.mark_px,
-                    signal.reason
+                    adjusted_signal.reason
                 );
                 continue;
             }
-            match self.enter_position(meta, signal, requested_qty).await? {
+            match self
+                .enter_position(meta, adjusted_signal, requested_qty)
+                .await?
+            {
                 EntryAttemptOutcome::Entered
                 | EntryAttemptOutcome::Pending
                 | EntryAttemptOutcome::Rejected => {}
@@ -1300,9 +1381,13 @@ impl EvClawRuntime {
                 .find_open_trade(&position.symbol)?
                 .map(|trade| trade.id))
             {
-                let _ = self
-                    .journal
-                    .close_trade(trade_id, exit_price, reason, exit_signal)?;
+                let _ = self.close_trade_and_update_streak(
+                    trade_id,
+                    &position.symbol,
+                    exit_price,
+                    reason,
+                    exit_signal,
+                )?;
             }
             return Ok(ExitDisposition::Closed);
         }
@@ -1331,9 +1416,13 @@ impl EvClawRuntime {
             .find_open_trade(&position.symbol)?
             .map(|trade| trade.id))
         {
-            let _ = self
-                .journal
-                .close_trade(trade_id, exit_price, reason, exit_signal)?;
+            let _ = self.close_trade_and_update_streak(
+                trade_id,
+                &position.symbol,
+                exit_price,
+                reason,
+                exit_signal,
+            )?;
         }
         Ok(ExitDisposition::Closed)
     }
@@ -2344,7 +2433,7 @@ fn late_entry_guard_metrics(
 
 fn late_entry_guard_base_atr_multiplier(bucket_policy: &OiBucketPolicy) -> f64 {
     match bucket_policy.bucket_label.as_str() {
-        ">=1B" => 2.0,
+        ">=1.5B" => 2.0,
         ">=500M" => 2.25,
         ">=100M" => 2.5,
         ">=50M" => 2.75,
@@ -2481,76 +2570,76 @@ pub fn combined_target(
 }
 
 fn oi_bucket_policy(oi_usd: f64) -> OiBucketPolicy {
-    if oi_usd >= 1_000_000_000.0 {
+    if oi_usd >= 1_500_000_000.0 {
         OiBucketPolicy {
-            bucket_label: ">=1B".to_string(),
+            bucket_label: ">=1.5B".to_string(),
             oi_usd_at_entry: oi_usd,
-            size_multiplier: 3.0,
+            size_multiplier: 2.2,
             sl_atr_multiplier: 2.0,
-            tp_atr_multiplier: 3.0,
+            tp_atr_multiplier: 2.0,
             min_hold_hours: 2.0,
         }
     } else if oi_usd >= 500_000_000.0 {
         OiBucketPolicy {
             bucket_label: ">=500M".to_string(),
             oi_usd_at_entry: oi_usd,
-            size_multiplier: 2.5,
+            size_multiplier: 1.5,
             sl_atr_multiplier: 2.25,
-            tp_atr_multiplier: 3.5,
+            tp_atr_multiplier: 2.25,
             min_hold_hours: 2.0,
         }
     } else if oi_usd >= 100_000_000.0 {
         OiBucketPolicy {
             bucket_label: ">=100M".to_string(),
             oi_usd_at_entry: oi_usd,
-            size_multiplier: 2.0,
+            size_multiplier: 1.2,
             sl_atr_multiplier: 2.5,
-            tp_atr_multiplier: 4.0,
+            tp_atr_multiplier: 2.5,
             min_hold_hours: 3.0,
         }
     } else if oi_usd >= 50_000_000.0 {
         OiBucketPolicy {
             bucket_label: ">=50M".to_string(),
             oi_usd_at_entry: oi_usd,
-            size_multiplier: 1.5,
+            size_multiplier: 1.0,
             sl_atr_multiplier: 2.75,
-            tp_atr_multiplier: 4.25,
+            tp_atr_multiplier: 2.75,
             min_hold_hours: 3.0,
         }
     } else if oi_usd >= 40_000_000.0 {
         OiBucketPolicy {
             bucket_label: ">=40M".to_string(),
             oi_usd_at_entry: oi_usd,
-            size_multiplier: 1.0,
+            size_multiplier: 0.8,
             sl_atr_multiplier: 3.0,
-            tp_atr_multiplier: 4.75,
+            tp_atr_multiplier: 3.0,
             min_hold_hours: 3.0,
         }
     } else if oi_usd >= 25_000_000.0 {
         OiBucketPolicy {
             bucket_label: ">=25M".to_string(),
             oi_usd_at_entry: oi_usd,
-            size_multiplier: 0.8,
+            size_multiplier: 0.6,
             sl_atr_multiplier: 3.25,
-            tp_atr_multiplier: 5.0,
+            tp_atr_multiplier: 3.25,
             min_hold_hours: 4.0,
         }
     } else if oi_usd >= 10_000_000.0 {
         OiBucketPolicy {
             bucket_label: ">=10M".to_string(),
             oi_usd_at_entry: oi_usd,
-            size_multiplier: 0.6,
+            size_multiplier: 0.4,
             sl_atr_multiplier: 3.5,
-            tp_atr_multiplier: 6.0,
+            tp_atr_multiplier: 3.5,
             min_hold_hours: 5.0,
         }
     } else {
         OiBucketPolicy {
             bucket_label: ">=1M".to_string(),
             oi_usd_at_entry: oi_usd,
-            size_multiplier: 0.3,
-            sl_atr_multiplier: 3.75,
-            tp_atr_multiplier: 7.0,
+            size_multiplier: 0.2,
+            sl_atr_multiplier: 4.0,
+            tp_atr_multiplier: 4.0,
             min_hold_hours: 6.0,
         }
     }
@@ -2571,6 +2660,59 @@ fn resolved_bucket_policy(
     }
 }
 
+fn next_symbol_loss_streak(current: u32, realized_pnl: f64) -> u32 {
+    if realized_pnl > 0.0 {
+        return 0;
+    }
+    if realized_pnl < 0.0 {
+        let next = current.saturating_add(1);
+        return if next >= LOSS_STREAK_RESET_AFTER {
+            0
+        } else {
+            next
+        };
+    }
+    current
+}
+
+fn loss_streak_step_multiplier(bucket_policy: &OiBucketPolicy) -> f64 {
+    match bucket_policy.bucket_label.as_str() {
+        ">=1.5B" => 1.1,
+        ">=500M" => 1.2,
+        ">=100M" => 1.4,
+        ">=50M" => 1.6,
+        ">=40M" => 1.8,
+        ">=25M" => 2.0,
+        ">=10M" => 2.1,
+        _ => 2.2,
+    }
+}
+
+fn deterministic_loss_jitter(symbol: &str, loss_streak: u32, cycle_count: u64, now_ms: u64) -> f64 {
+    let mut hasher = DefaultHasher::new();
+    symbol.hash(&mut hasher);
+    loss_streak.hash(&mut hasher);
+    cycle_count.hash(&mut hasher);
+    now_ms.hash(&mut hasher);
+    let unit = hasher.finish() as f64 / u64::MAX as f64;
+    1.0 + ((unit * 2.0) - 1.0) * LOSS_STREAK_JITTER_RATIO
+}
+
+fn effective_loss_streak_size_multiplier(
+    symbol: &str,
+    loss_streak: u32,
+    bucket_policy: &OiBucketPolicy,
+    cycle_count: u64,
+    now_ms: u64,
+) -> f64 {
+    if loss_streak == 0 || loss_streak >= LOSS_STREAK_RESET_AFTER {
+        return 1.0;
+    }
+    let step = loss_streak_step_multiplier(bucket_policy)
+        * deterministic_loss_jitter(symbol, loss_streak, cycle_count, now_ms);
+    step.powi(loss_streak as i32)
+}
+
 pub fn should_release_reentry_block(
     blocked_direction: Direction,
     target_direction: Direction,
@@ -2585,10 +2727,11 @@ fn should_start_symbol_cooldown(exit_reason: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_disappeared_position, combined_target, infer_sltp_presence,
-        late_entry_guard_base_atr_multiplier, late_entry_guard_hit, late_entry_guard_metrics,
-        oi_bucket_policy, pressure_exit_metrics, recent_disappearance_fill_price,
-        should_start_symbol_cooldown, should_submit_acp_sltp,
+        classify_disappeared_position, combined_target, effective_loss_streak_size_multiplier,
+        infer_sltp_presence, late_entry_guard_base_atr_multiplier, late_entry_guard_hit,
+        late_entry_guard_metrics, next_symbol_loss_streak, oi_bucket_policy, pressure_exit_metrics,
+        recent_disappearance_fill_price, should_start_symbol_cooldown, should_submit_acp_sltp,
+        LOSS_STREAK_RESET_AFTER,
     };
     use crate::types::{
         AtrCheckpointData, CombinedSignal, DeadCapSnapshot, Direction, OiBucketPolicy, OpenOrder,
@@ -2775,47 +2918,51 @@ mod tests {
 
     #[test]
     fn oi_bucket_policy_thresholds_match_live_schedule() {
-        let p = oi_bucket_policy(1_100_000_000.0);
-        assert_eq!(p.bucket_label, ">=1B");
-        assert_eq!(p.size_multiplier, 3.0);
+        let p = oi_bucket_policy(1_600_000_000.0);
+        assert_eq!(p.bucket_label, ">=1.5B");
+        assert_eq!(p.size_multiplier, 2.2);
         assert_eq!(p.sl_atr_multiplier, 2.0);
-        assert_eq!(p.tp_atr_multiplier, 3.0);
+        assert_eq!(p.tp_atr_multiplier, 2.0);
         assert_eq!(p.min_hold_hours, 2.0);
+
+        let p = oi_bucket_policy(1_100_000_000.0);
+        assert_eq!(p.bucket_label, ">=500M");
+        assert_eq!(p.size_multiplier, 1.5);
 
         let p = oi_bucket_policy(600_000_000.0);
         assert_eq!(p.bucket_label, ">=500M");
-        assert_eq!(p.size_multiplier, 2.5);
+        assert_eq!(p.size_multiplier, 1.5);
 
         let p = oi_bucket_policy(150_000_000.0);
         assert_eq!(p.bucket_label, ">=100M");
-        assert_eq!(p.size_multiplier, 2.0);
+        assert_eq!(p.size_multiplier, 1.2);
         assert_eq!(p.min_hold_hours, 3.0);
 
         let p = oi_bucket_policy(60_000_000.0);
         assert_eq!(p.bucket_label, ">=50M");
-        assert_eq!(p.size_multiplier, 1.5);
+        assert_eq!(p.size_multiplier, 1.0);
         assert_eq!(p.min_hold_hours, 3.0);
 
         let p = oi_bucket_policy(45_000_000.0);
         assert_eq!(p.bucket_label, ">=40M");
-        assert_eq!(p.size_multiplier, 1.0);
+        assert_eq!(p.size_multiplier, 0.8);
         assert_eq!(p.min_hold_hours, 3.0);
 
         let p = oi_bucket_policy(30_000_000.0);
         assert_eq!(p.bucket_label, ">=25M");
-        assert_eq!(p.size_multiplier, 0.8);
+        assert_eq!(p.size_multiplier, 0.6);
         assert_eq!(p.min_hold_hours, 4.0);
 
         let p = oi_bucket_policy(15_000_000.0);
         assert_eq!(p.bucket_label, ">=10M");
-        assert_eq!(p.size_multiplier, 0.6);
+        assert_eq!(p.size_multiplier, 0.4);
         assert_eq!(p.min_hold_hours, 5.0);
 
         let p = oi_bucket_policy(5_000_000.0);
         assert_eq!(p.bucket_label, ">=1M");
-        assert_eq!(p.size_multiplier, 0.3);
-        assert_eq!(p.sl_atr_multiplier, 3.75);
-        assert_eq!(p.tp_atr_multiplier, 7.0);
+        assert_eq!(p.size_multiplier, 0.2);
+        assert_eq!(p.sl_atr_multiplier, 4.0);
+        assert_eq!(p.tp_atr_multiplier, 4.0);
         assert_eq!(p.min_hold_hours, 6.0);
     }
 
@@ -2831,8 +2978,8 @@ mod tests {
         let (_, target_direction, raw_notional_usd, order_notional_usd) =
             combined_target(&dead_cap, &whale, 500.0, 150.0, &bucket_policy);
         assert_eq!(target_direction, Direction::Long);
-        assert!((raw_notional_usd - 1_200.0).abs() < 1e-9);
-        assert!((order_notional_usd - 1_200.0).abs() < 1e-9);
+        assert!((raw_notional_usd - 600.0).abs() < 1e-9);
+        assert!((order_notional_usd - 600.0).abs() < 1e-9);
     }
 
     #[test]
@@ -3008,7 +3155,7 @@ mod tests {
 
     #[test]
     fn late_entry_guard_uses_bucket_base_schedule() {
-        let major = oi_bucket_policy(1_100_000_000.0);
+        let major = oi_bucket_policy(1_600_000_000.0);
         assert!((late_entry_guard_base_atr_multiplier(&major) - 2.0).abs() < 1e-9);
 
         let mid = oi_bucket_policy(600_000_000.0);
@@ -3083,7 +3230,7 @@ mod tests {
 
     #[test]
     fn late_entry_guard_blocks_long_on_directional_low_extension() {
-        let bucket = oi_bucket_policy(1_200_000_000.0);
+        let bucket = oi_bucket_policy(1_600_000_000.0);
         let checkpoint_data = AtrCheckpointData {
             atr: 1.0,
             high_4h_ago: 101.0,
@@ -3108,5 +3255,57 @@ mod tests {
             metrics.extension_12h_atr,
             metrics.threshold_12h_atr
         ));
+    }
+
+    #[test]
+    fn oi_bucket_policy_uses_new_thresholds_and_equal_atr_targets() {
+        let mega = oi_bucket_policy(1_600_000_000.0);
+        assert_eq!(mega.bucket_label, ">=1.5B");
+        assert!((mega.size_multiplier - 2.2).abs() < 1e-9);
+        assert!((mega.sl_atr_multiplier - 2.0).abs() < 1e-9);
+        assert!((mega.tp_atr_multiplier - 2.0).abs() < 1e-9);
+
+        let upper_mid = oi_bucket_policy(1_200_000_000.0);
+        assert_eq!(upper_mid.bucket_label, ">=500M");
+        assert!((upper_mid.size_multiplier - 1.5).abs() < 1e-9);
+        assert!((upper_mid.tp_atr_multiplier - 2.25).abs() < 1e-9);
+
+        let micro = oi_bucket_policy(5_000_000.0);
+        assert_eq!(micro.bucket_label, ">=1M");
+        assert!((micro.size_multiplier - 0.2).abs() < 1e-9);
+        assert!((micro.sl_atr_multiplier - 4.0).abs() < 1e-9);
+        assert!((micro.tp_atr_multiplier - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn symbol_loss_streak_resets_on_win_and_sixth_loss() {
+        let mut streak = 0;
+        streak = next_symbol_loss_streak(streak, -1.0);
+        assert_eq!(streak, 1);
+        streak = next_symbol_loss_streak(streak, -1.0);
+        assert_eq!(streak, 2);
+        streak = next_symbol_loss_streak(streak, 1.0);
+        assert_eq!(streak, 0);
+
+        let mut streak = 0;
+        for expected in 1..LOSS_STREAK_RESET_AFTER {
+            streak = next_symbol_loss_streak(streak, -1.0);
+            assert_eq!(streak, expected);
+        }
+        streak = next_symbol_loss_streak(streak, -1.0);
+        assert_eq!(streak, 0);
+    }
+
+    #[test]
+    fn loss_streak_size_multiplier_stays_within_requested_jitter_band() {
+        let bucket = oi_bucket_policy(30_000_000.0);
+        let one_loss = effective_loss_streak_size_multiplier("AZTEC", 1, &bucket, 42, 1_234_567);
+        assert!((1.8..=2.2).contains(&one_loss));
+
+        let two_losses = effective_loss_streak_size_multiplier("AZTEC", 2, &bucket, 42, 1_234_567);
+        assert!((1.8_f64.powi(2)..=2.2_f64.powi(2)).contains(&two_losses));
+
+        let reset = effective_loss_streak_size_multiplier("AZTEC", 6, &bucket, 42, 1_234_567);
+        assert!((reset - 1.0).abs() < 1e-9);
     }
 }

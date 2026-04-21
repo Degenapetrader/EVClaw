@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -335,6 +335,32 @@ impl TradeJournal {
         })
     }
 
+    pub fn symbol_loss_streaks(&self, reset_after_losses: u32) -> Result<HashMap<String, u32>> {
+        let conn = self.connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT symbol, COALESCE(realized_pnl, 0.0)
+             FROM trades
+             WHERE status = 'CLOSED'
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        })?;
+
+        let mut streaks = HashMap::new();
+        for row in rows {
+            let (symbol, realized_pnl) = row?;
+            let current = streaks.get(&symbol).copied().unwrap_or(0);
+            let next = next_loss_streak(current, realized_pnl, reset_after_losses);
+            if next == 0 {
+                streaks.remove(&symbol);
+            } else {
+                streaks.insert(symbol, next);
+            }
+        }
+        Ok(streaks)
+    }
+
     pub fn last_fill_time_ms(&self) -> Result<Option<i64>> {
         self.connection()?
             .query_row("SELECT MAX(fill_time_ms) FROM fills", params![], |row| {
@@ -364,10 +390,7 @@ impl TradeJournal {
             }
             if trade.status == "CLOSED" {
                 let exit_like = trade.exit_reason.as_deref().unwrap_or_default();
-                if matches!(
-                    exit_like,
-                    "EXIT" | "SL" | "TP" | "LIKELY_SL" | "LIKELY_TP" | "EXTERNAL_CLOSE"
-                ) {
+                if fill_matches_closed_trade_exit_reason(exit_like) {
                     return Ok(Some(trade.id));
                 }
             }
@@ -615,5 +638,44 @@ fn realized_pnl(direction: Direction, entry_price: f64, exit_price: f64, size: f
         Direction::Long => (exit_price - entry_price) * size,
         Direction::Short => (entry_price - exit_price) * size,
         Direction::Neutral => 0.0,
+    }
+}
+
+fn fill_matches_closed_trade_exit_reason(exit_reason: &str) -> bool {
+    matches!(
+        exit_reason,
+        "EXIT" | "SL" | "TP" | "LIKELY_SL" | "LIKELY_TP" | "EXTERNAL_CLOSE"
+    ) || exit_reason.starts_with("PRESSURE_DECAY")
+}
+
+fn next_loss_streak(current: u32, realized_pnl: f64, reset_after_losses: u32) -> u32 {
+    if realized_pnl > 0.0 {
+        return 0;
+    }
+    if realized_pnl < 0.0 {
+        let next = current.saturating_add(1);
+        return if reset_after_losses > 0 && next >= reset_after_losses {
+            0
+        } else {
+            next
+        };
+    }
+    current
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fill_matches_closed_trade_exit_reason;
+
+    #[test]
+    fn pressure_decay_closed_trades_can_absorb_late_fills() {
+        assert!(fill_matches_closed_trade_exit_reason(
+            "PRESSURE_DECAY 9.25% < 9.60% (80% of 12.00%)"
+        ));
+    }
+
+    #[test]
+    fn order_failed_closed_trades_do_not_absorb_late_fills() {
+        assert!(!fill_matches_closed_trade_exit_reason("ORDER_FAILED"));
     }
 }
