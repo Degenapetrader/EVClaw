@@ -1,5 +1,9 @@
 # EVClaw
 
+> **Retired (17 Nov 2026).** EVClaw is no longer maintained. The services it depends on (`tracker.evplus.ai`,
+> `node2.evplus.ai` and the builder-fee setup page `atsetup.evplus.ai`) are offline, so a new install cannot connect.
+> The code stays here for reference only.
+
 EVClaw is an autonomous AGI trading skill for Hyperliquid:
 - Perps trading
 - HIP3 builder stocks
